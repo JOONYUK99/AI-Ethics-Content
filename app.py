@@ -1,52 +1,13 @@
-# ===================================================================
-# 1. 필요한 모든 라이브러리 설치
-# ===================================================================
-!pip install -q streamlit pyngrok google-generativeai
-
-# ===================================================================
-# 2. Streamlit 앱 전체 코드를 app.py 파일로 저장
-# ===================================================================
-app_code = r"""
 import streamlit as st
 import google.generativeai as genai
 import re
-import base64 # 이미지 인코딩을 위한 라이브러리 추가
+import urllib.parse
 
 # --- 1. AI 핵심 기능 함수 정의 ---
 def get_model(model_name='gemini-pro'):
     return genai.GenerativeModel(model_name)
 
-# <--- 이미지 생성 모델 호출 함수 추가 --->
-def generate_image(prompt_text, api_key):
-    # DALL-E와 같은 별도의 이미지 생성 모델이 필요한 경우 여기에 통합
-    # 현재는 placehold.co 서비스를 사용하지만, 실제 이미지 생성 API와 연동 가능
-    # 여기서는 임시로 placehold.co를 사용하고, 추후 실제 이미지 생성 API로 교체할 수 있음
-    try:
-        # Gemini Vision 모델을 사용하여 이미지 생성 프롬프트 최적화
-        vision_model = genai.GenerativeModel('gemini-pro-vision')
-        
-        # 이미지 생성 프롬프트 요청
-        image_prompt_request = vision_model.generate_content(
-            f"다음 스토리의 핵심 내용과 분위기를 담은 초등학생 눈높이의 동화풍 일러스트를 위한 영어 프롬프트를 15단어 이내로 생성해줘: {prompt_text}"
-        )
-        image_gen_prompt = image_prompt_request.text.strip().replace('"', '')
-
-        # DALL-E 등의 실제 이미지 생성 API 호출 부분 (현재는 placehold.co로 대체)
-        # 예시: (실제 API 호출 코드는 여기에 들어갈 수 있습니다)
-        # response = dall_e_api.create_image(prompt=image_gen_prompt, size="512x512")
-        # image_url = response['data'][0]['url']
-        
-        # 현재는 임시로 placehold.co 서비스를 사용하여 텍스트 기반 이미지를 생성
-        # 실제 이미지를 생성하고 싶다면, 여기에 실제 이미지 생성 API를 연동해야 합니다.
-        encoded_prompt = urllib.parse.quote(image_gen_prompt)
-        image_url = f"https://placehold.co/600x300/E8E8E8/313131?text={encoded_prompt}"
-        
-        return image_url, image_gen_prompt
-    except Exception as e:
-        st.error(f"이미지 생성 중 오류 발생: {e}")
-        return None, "이미지 생성 실패"
-
-def generate_story_part(topic, api_key, history_summary=""):
+def generate_story_part(topic, history_summary=""):
     model = get_model()
     if not history_summary:
         prompt = f"'{topic}'라는 주제로, 초등학생 고학년이 흥미를 느낄 만한 AI 윤리 딜레마 이야기의 '첫 부분'을 만들어줘. 이야기는 3~4개의 짧은 문장으로 구성하고, 주인공이 중요한 결정을 내려야 하는 순간에서 끝나야 해."
@@ -57,7 +18,17 @@ def generate_story_part(topic, api_key, history_summary=""):
         return response.text.strip()
     except Exception as e: return f"이야기 생성 중 오류: {e}"
 
-def generate_choices_for_story(story_part, api_key):
+def generate_image_keywords(story_part):
+    model = get_model()
+    prompt = f"다음 한국어 문장의 핵심 내용을 대표하는 영어 단어 2개를 쉼표로 구분하여 짧게 요약해줘. 예: '미래 도시의 로봇 친구가 사람을 도와준다' -> 'future city, robot friend'\n\n문장: {story_part}"
+    try:
+        response = model.generate_content(prompt)
+        keywords = [keyword.strip() for keyword in response.text.strip().split(',')]
+        return ",".join(keywords)
+    except Exception:
+        return "AI,robot,children"
+
+def generate_choices_for_story(story_part):
     model = get_model()
     prompt = f"아래 이야기의 마지막 상황에서 주인공이 할 수 있는, 윤리적으로 상반된 두 가지 선택지를 초등학생 눈높이에 맞춰서 간결하게 만들어줘.\n[출력 형식]\nA: [A 선택지 내용]\nB: [B 선택지 내용]\n\n--- 이야기 ---\n{story_part}"
     try:
@@ -65,7 +36,7 @@ def generate_choices_for_story(story_part, api_key):
         return response.text.strip()
     except Exception as e: return f"선택지 생성 중 오류: {e}"
 
-def start_debate(current_story_log, choice, api_key):
+def start_debate(current_story_log, choice):
     model = get_model()
     prompt = f"당신은 학생들을 아주 아끼는 다정한 AI 윤리 선생님입니다. 학생이 방금 내린 선택('{choice}')을 칭찬하고, 왜 그렇게 생각했는지 부드럽게 첫 질문을 던져주세요.\n\n--- 이야기와 학생의 선택 ---\n{current_story_log}\n\nAI 선생님의 따뜻한 첫 질문:"
     try:
@@ -73,7 +44,7 @@ def start_debate(current_story_log, choice, api_key):
         return response.text
     except Exception as e: return f"토론 시작 중 오류: {e}"
 
-def continue_debate(current_debate_history, api_key):
+def continue_debate(current_debate_history):
     model = get_model()
     prompt = f"당신은 다정한 AI 윤리 선생님입니다. 학생의 이전 답변에 공감하며 토론을 이어가주세요. '혹시 이런 점은 어떨까요?' 와 같이 부드러운 말투로 반대 관점이나 새로운 생각해볼 거리를 질문으로 제시해주세요.\n\n--- 지금까지의 토론 내용 ---\n{current_debate_history}\n\nAI 선생님의 다음 질문:"
     try:
@@ -81,7 +52,7 @@ def continue_debate(current_debate_history, api_key):
         return response.text
     except Exception as e: return f"토론 중 오류: {e}"
 
-def generate_conclusion(final_history, api_key):
+def generate_conclusion(final_history):
     model = get_model()
     prompt = (
         "다음은 한 학생이 AI 윤리 문제에 대해 총 4번의 선택과 토론을 거친 전체 기록입니다.\n\n"
@@ -101,15 +72,10 @@ st.set_page_config(page_title="AI 윤리 교육", page_icon="✨", layout="cente
 st.title("✨ 초등학생을 위한 AI 윤리 교육")
 
 try:
-    API_KEY = st.secrets["GOOGLE_API_KEY"]
-    genai.configure(api_key=API_KEY)
-except KeyError:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+except Exception:
     st.error("API 키를 설정해주세요!")
     st.stop()
-except Exception:
-    st.error("API 키 설정 중 문제가 발생했습니다. 다시 확인해주세요!")
-    st.stop()
-
 
 if 'stage' not in st.session_state:
     st.session_state.stage = 'start'
@@ -140,13 +106,12 @@ elif st.session_state.stage == 'story':
     history_summary = st.session_state.full_log[-500:] if st.session_state.choice_count > 0 else ""
     st.markdown(f"### ✨ 새로운 이야기 #{st.session_state.choice_count + 1} ✨")
     with st.spinner(f"AI가 이야기 #{st.session_state.choice_count + 1}을(를) 생성 중입니다..."):
-        story_part = generate_story_part(st.session_state.topic, API_KEY, history_summary)
-        image_url, image_gen_prompt = generate_image(story_part, API_KEY) # 이미지 생성
-        choices_text = generate_choices_for_story(story_part, API_KEY)
+        story_part = generate_story_part(st.session_state.topic, history_summary)
+        keywords = generate_image_keywords(story_part)
+        encoded_keywords = urllib.parse.quote(keywords)
+        st.image(f"https://placehold.co/600x300/E8E8E8/313131?text={encoded_keywords}", caption=f"AI가 생각한 이미지 키워드: {keywords}")
+        choices_text = generate_choices_for_story(story_part)
     
-    if image_url:
-        st.image(image_url, caption=f"AI가 그린 그림: {image_gen_prompt}")
-        
     st.write(story_part)
     st.session_state.current_story_part_log = f"### 이야기 #{st.session_state.choice_count + 1}\n{story_part}"
     
@@ -163,7 +128,7 @@ elif st.session_state.stage == 'story':
         if col2.button(f"B: {choice_b_text}", use_container_width=True, key=f"B_{st.session_state.choice_count}"):
             st.session_state.current_story_part_log += f"\n\n**>> 나의 선택:** {choice_b_text}"; st.session_state.stage = 'debate'; st.rerun()
     except Exception as e:
-        st.error(f"선택지를 만드는 데 실패했어요. AI의 답변 형식이 달랐을 수도 있어요. 다시 시도해주세요.")
+        st.error(f"선택지를 만드는 데 실패했어요. AI가 이상한 답변을 주었을 수도 있어요. 다시 시도해주세요.")
         if st.button("이야기 다시 만들기"): st.rerun()
 
 elif st.session_state.stage == 'debate':
@@ -178,7 +143,7 @@ elif st.session_state.stage == 'debate':
     if st.session_state.debate_turns == 0:
         with st.chat_message("assistant"):
             with st.spinner("AI 선생님이 첫 질문을 준비하고 있어요..."):
-                question = start_debate(st.session_state.current_story_part_log, st.session_state.current_story_part_log.split('>> 나의 선택:')[-1].strip(), API_KEY)
+                question = start_debate(st.session_state.current_story_part_log, st.session_state.current_story_part_log.split('>> 나의 선택:')[-1].strip())
                 st.session_state.current_story_part_log += f"\n\n**AI 선생님:** {question}"
                 st.session_state.debate_turns = 1; st.rerun()
     elif st.session_state.debate_turns == 1:
@@ -187,7 +152,7 @@ elif st.session_state.stage == 'debate':
     elif st.session_state.debate_turns == 2:
         with st.chat_message("assistant"):
             with st.spinner("AI 선생님이 다음 질문을 생각 중이에요..."):
-                question = continue_debate(st.session_state.current_story_part_log, API_KEY)
+                question = continue_debate(st.session_state.current_story_part_log)
                 st.session_state.current_story_part_log += f"\n\n**AI 선생님:** {question}"; st.session_state.debate_turns = 3; st.rerun()
     elif st.session_state.debate_turns == 3:
         if reply := st.chat_input("두 번째 의견을 이야기해주세요:"):
@@ -210,49 +175,10 @@ elif st.session_state.stage == 'conclusion':
     st.markdown(st.session_state.full_log, unsafe_allow_html=True)
     st.markdown("---")
     with st.spinner("AI 선생님이 우리의 멋진 여정을 정리하고 있어요..."):
-        conclusion = generate_conclusion(st.session_state.full_log, API_KEY)
+        conclusion = generate_conclusion(st.session_state.full_log)
         st.balloons(); st.success("모든 이야기가 끝났어요! 정말 수고 많았어요!")
         st.markdown("---")
         st.markdown("### ✨ AI 선생님의 최종 정리 및 대처법 ✨")
         st.write(conclusion)
     if st.button("새로운 주제로 다시 시작하기"):
         restart_lesson(); st.rerun()
-"""
-with open("app.py", "w", encoding="utf-8") as f:
-    f.write(app_code)
-
-# ===================================================================
-# 3. Colab에 API 키를 설정하고 Streamlit 앱 실행
-# ===================================================================
-from google.colab import userdata
-from pyngrok import ngrok
-import os
-
-try:
-    ngrok_token = userdata.get('NGROK_AUTH_TOKEN')
-    api_key = userdata.get('GOOGLE_API_KEY')
-    !ngrok authtoken {ngrok_token}
-    secrets_dir = os.path.expanduser('~/.streamlit')
-    os.makedirs(secrets_dir, exist_ok=True)
-    with open(os.path.join(secrets_dir, "secrets.toml"), "w") as f:
-        f.write(f'GOOGLE_API_KEY = "{api_key}"\n')
-except (userdata.SecretNotFoundError, NameError):
-    print("❗️ Colab Secrets에 'NGROK_AUTH_TOKEN'과 'GOOGLE_API_KEY'를 모두 추가해주세요.")
-    raise SystemExit()
-
-ngrok.kill()
-try:
-    public_url = ngrok.connect(8501)
-    print("🎉 챗봇 앱이 준비되었습니다! 아래 링크를 클릭하여 접속하세요:")
-    print(public_url)
-except Exception as e:
-    print(f"❗️ ngrok 연결 중 오류 발생: {e}")
-    raise SystemExit()
-
-# requirements.txt 파일 생성 (자동 설치되도록)
-with open("requirements.txt", "w") as f:
-    f.write("streamlit\n")
-    f.write("google-generativeai\n")
-    f.write("pyngrok\n")
-
-!streamlit run app.py --logger.level=error
