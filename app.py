@@ -4,12 +4,10 @@ import re
 
 # --- 1. AI 핵심 기능 함수 정의 ---
 def get_model():
-    # 사용 가능한 안정적인 모델로 지정
     return genai.GenerativeModel('gemini-pro-latest')
 
 def generate_full_scenario(topic):
     model = get_model()
-    # 문법 오류를 피하기 위해 프롬프트 정의 방식을 수정
     prompt = (
         "당신은 초등학생들에게 이야기를 들려주는 다정하고 친절한 동화 작가입니다.\n"
         f"'{topic}'라는 주제로, 학생들이 몰입할 수 있고 따뜻한 감성이 담긴, 총 4개의 파트로 구성된 완결된 이야기를 만들어주세요.\n"
@@ -49,7 +47,7 @@ def continue_debate(debate_history):
         "당신은 다정한 AI 윤리 선생님입니다. 학생의 의견에 공감하며 토론을 이어가주세요.\n\n"
         "# 역할:\n"
         "1. 학생의 의견을 먼저 긍정적으로 인정해주세요. (예: \"아, 그런 깊은 뜻이 있었군요.\", \"좋은 생각이에요.\")\n"
-        "2. 그 다음, \"혹시 이런 점은 어떨까요?\" 와 같이 부드러운 말투로 반대 관점이나 새로운 생각해볼 거리를 질문으로 제시해주세요.\n\n"
+        "2. 그 다음, \"혹시 이런 점은 어떨까요?\" 와 같이 부드럽운 말투로 반대 관점이나 새로운 생각해볼 거리를 질문으로 제시해주세요.\n\n"
         "--- 지금까지의 토론 내용 ---\n"
         f"{debate_history}\n\n"
         "AI 선생님의 다음 질문:"
@@ -114,7 +112,7 @@ if st.session_state.stage == 'start':
     topics = ["자율주행 자동차의 윤리적 딜레마", "인공지능 판사의 공정성 문제", "AI 창작물의 저작권", "개인정보를 학습한 AI 챗봇"]
     selected_topic = st.selectbox("오늘 탐구해볼 주제를 선택해볼까요?", topics)
 
-    if st.button("수업 시작하기"):
+    if st.button("수업 시작하기", key="start_button"):
         st.session_state.topic = selected_topic
         with st.spinner("AI 선생님이 여러분을 위한 특별한 이야기를 만들고 있어요. 잠시만 기다려주세요..."):
             scenario_text = generate_full_scenario(st.session_state.topic)
@@ -157,20 +155,20 @@ elif st.session_state.stage == 'debate':
                 question = start_debate(st.session_state.full_log, choice)
                 st.session_state.full_log += f"\n\n**AI 선생님:** {question}"; st.session_state.debate_turns = 1; st.rerun()
     elif st.session_state.debate_turns == 1:
-        if reply := st.chat_input("첫 번째 의견을 이야기해주세요:"):
+        if reply := st.chat_input("첫 번째 의견을 이야기해주세요:", key=f"reply1_{st.session_state.current_part}"):
             st.session_state.full_log += f"\n\n**나 (의견 1):** {reply}"; st.session_state.debate_turns = 2; st.rerun()
     elif st.session_state.debate_turns == 2:
         with st.chat_message("assistant"):
-            with st.spinner("AI 선생님이 다음 질문을 준비하고 있어요..."):
+            with st.spinner("AI 선생님이 다음 질문을 생각 중이에요..."):
                 question = continue_debate(st.session_state.full_log)
                 st.session_state.full_log += f"\n\n**AI 선생님:** {question}"; st.session_state.debate_turns = 3; st.rerun()
     elif st.session_state.debate_turns == 3:
-        if reply := st.chat_input("두 번째 의견을 이야기해주세요:"):
+        if reply := st.chat_input("두 번째 의견을 이야기해주세요:", key=f"reply2_{st.session_state.current_part}"):
             st.session_state.full_log += f"\n\n**나 (의견 2):** {reply}"; st.session_state.debate_turns = 4; st.rerun()
     elif st.session_state.debate_turns == 4:
         st.info("토론이 완료되었어요. 아래 버튼을 눌러 다음으로 넘어가요!")
         st.session_state.current_part += 1
-        if st.button("다음 이야기로" if st.session_state.current_part < 4 else "최종 정리 보기"):
+        if st.button("다음 이야기로" if st.session_state.current_part < 4 else "최종 정리 보기", key=f"continue_{st.session_state.current_part}"):
             st.session_state.debate_turns = 0
             if st.session_state.current_part >= 4:
                 st.session_state.stage = 'conclusion'
@@ -184,5 +182,5 @@ elif st.session_state.stage == 'conclusion':
         conclusion = generate_conclusion(st.session_state.full_log)
         st.balloons(); st.success("모든 이야기가 끝났어요! 정말 수고 많았어요!")
         st.markdown("---"); st.markdown("### 최종 정리"); st.write(conclusion)
-    if st.button("새로운 주제로 다시 시작하기"):
+    if st.button("새로운 주제로 다시 시작하기", key="restart_button"):
         restart_lesson(); st.rerun()
