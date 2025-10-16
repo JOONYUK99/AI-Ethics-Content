@@ -6,29 +6,30 @@ import re
 def get_model():
     return genai.GenerativeModel('gemini-pro-latest')
 
-def transform_scenario(teacher_input):
+def generate_story_part(topic, history_summary=""):
     model = get_model()
-    prompt = (
-        "당신은 초등학생 고학년을 위한 AI 윤리 교육용 인터랙티브 시나리오 작가입니다.\n"
-        f"아래의 '입력 내용'을 바탕으로, 학생들이 몰입할 수 있고 총 4번의 선택을 하게 되는 완결된 이야기를 만들어주세요.\n"
-        "각 파트의 끝에는 주인공의 고민이 잘 드러나는 두 가지 선택지를 포함해주세요.\n\n"
-        "# 필수 출력 형식:\n"
-        "[STORY 1] (이야기 내용) [CHOICE 1A] (A 선택지) [CHOICE 1B] (B 선택지)\n---\n"
-        "[STORY 2] (이야기 내용) [CHOICE 2A] (A 선택지) [CHOICE 2B] (B 선택지)\n---\n"
-        "[STORY 3] (이야기 내용) [CHOICE 3A] (A 선택지) [CHOICE 3B] (B 선택지)\n---\n"
-        "[STORY 4] (이야기 내용) [CHOICE 4A] (A 선택지) [CHOICE 4B] (B 선택지)\n\n"
-        f"--- 입력 내용 ---\n{teacher_input}"
-    )
+    # <--- 수정: 이야기를 '반드시 2문장'으로 매우 짧게 만들도록 프롬프트 강화
+    if not history_summary:
+        prompt = f"'{topic}'라는 주제로, 초등학생 저학년도 이해할 수 있는 AI 윤리 동화의 '첫 부분'을 만들어줘. 이야기는 반드시 간결한 두 문장으로만 구성하고, 주인공이 중요한 결정을 내려야 하는 순간에서 끝나야 해. 절대 길게 쓰지 마."
+    else:
+        prompt = f"다음은 지금까지 진행된 이야기의 요약이야: '{history_summary}'. 이 이야기에 이어서, 학생의 선택으로 인해 벌어지는 '다음 사건'을 반드시 간결한 두 문장으로 만들어줘. 그리고 이야기가 또 다른 중요한 결정을 내려야 하는 순간에서 끝나도록 해줘."
     try:
         response = model.generate_content(prompt)
         return response.text.strip()
-    except Exception as e:
-        return f"시나리오 생성 중 오류: {e}"
+    except Exception as e: return f"이야기 생성 중 오류: {e}"
+
+def generate_choices_for_story(story_part):
+    model = get_model()
+    prompt = f"아래 이야기의 마지막 상황에서 주인공이 할 수 있는, 윤리적으로 상반된 두 가지 선택지를 초등학생 눈높이에 맞춰서 간결하게 만들어줘.\n[출력 형식]\nA: [A 선택지 내용]\nB: [B 선택지 내용]\n\n--- 이야기 ---\n{story_part}"
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e: return f"선택지 생성 중 오류: {e}"
 
 def start_debate(history, choice):
     model = get_model()
     prompt = (
-        "당신은 학생들을 아주 아끼는 다정한 AI 윤리 선생님입니다. 학생의 선택을 격려하며 토론을 시작해주세요.\n\n"
+        "당신은 학생들을 아주 아끼는 다정한 AI 윤리 선생님입니다. 학생의 선택을 격려하며 토론을 시작해주세요.\n"
         f"--- 지금까지의 이야기와 학생의 선택 ---\n{history}\n학생의 선택: {choice}\n\nAI 선생님의 따뜻한 첫 질문:"
     )
     try:
@@ -39,7 +40,7 @@ def start_debate(history, choice):
 def continue_debate(debate_history):
     model = get_model()
     prompt = (
-        "당신은 다정한 AI 윤리 선생님입니다. 학생의 의견에 공감하며 토론을 이어가주세요.\n\n"
+        "당신은 다정한 AI 윤리 선생님입니다. 학생의 의견에 공감하며 토론을 이어가주세요.\n"
         f"--- 지금까지의 토론 내용 ---\n{debate_history}\n\nAI 선생님의 다음 질문:"
     )
     try:
@@ -51,7 +52,7 @@ def generate_conclusion(final_history):
     model = get_model()
     prompt = (
         "당신은 학생의 성장을 지켜본 다정한 AI 윤리 선생님입니다.\n"
-        "다음은 한 학생이 AI 윤리 문제에 대해 총 4번의 선택과 토론을 거친 전체 기록입니다. 이 기록을 바탕으로 학생의 고민 과정을 칭찬하고, 정답 찾기보다 과정 자체가 중요했다는 점을 강조하는 따뜻하고 격려가 되는 마무리 메시지를 작성해주세요.\n\n"
+        "다음은 한 학생이 AI 윤리 문제에 대해 거친 전체 기록입니다. 이 기록을 바탕으로, 학생의 고민 과정을 칭찬하고, 정답 찾기보다 과정 자체가 중요했다는 점을 강조하는 따뜻하고 격려가 되는 마무리 메시지를 작성해주세요.\n\n"
         f"--- 전체 기록 ---\n{final_history}"
     )
     try:
@@ -97,38 +98,51 @@ def restart_lesson():
     st.session_state.debate_turns = 0
 
 if st.session_state.stage == 'start':
-    st.info("AI 윤리 교육 콘텐츠로 만들고 싶은 실제 사례, 뉴스 기사 등을 아래에 입력해주세요.")
-    teacher_text = st.text_area("시나리오 입력:", height=150, placeholder="예시: AI 그림 대회에서 인공지능으로 그린 그림이 1등을 차지해서 논란이 되었습니다...")
-    if st.button("이 내용으로 교육 콘텐츠 생성하기"):
-        if not teacher_text:
-            st.warning("시나리오를 입력해주세요.")
-        else:
-            st.session_state.teacher_input = teacher_text
-            with st.spinner("AI가 입력하신 내용을 바탕으로 멋진 시나리오를 만들고 있어요. 잠시만 기다려주세요..."):
-                scenario_text = transform_scenario(st.session_state.teacher_input)
-                if parse_and_store_scenario(scenario_text):
-                    st.session_state.full_log = f"**입력 내용:** {st.session_state.teacher_input[:70]}..."
-                    st.session_state.current_part = 0
-                    st.session_state.stage = 'story'
-                    st.rerun()
-                else:
-                    st.error("AI가 이야기를 만들다 조금 힘들어하네요. 입력 내용을 조금 더 구체적으로 작성한 후 다시 시도해주세요.")
-                    st.code(scenario_text)
+    st.info("안녕하세요, 친구들! AI 윤리 문제에 대해 함께 고민해보는 수업에 오신 것을 환영해요.")
+    topics = ["자율주행 자동차의 윤리적 딜레마", "인공지능 판사의 공정성 문제", "AI 창작물의 저작권", "개인정보를 학습한 AI 챗봇"]
+    selected_topic = st.selectbox("오늘 탐구해볼 주제를 선택해볼까요?", topics)
+
+    if st.button("수업 시작하기"):
+        st.session_state.topic = selected_topic
+        st.session_state.stage = 'story'
+        st.rerun()
 
 elif st.session_state.stage == 'story':
-    part = st.session_state.full_scenario[st.session_state.current_part]
-    st.session_state.full_log += f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{part['story']}"
+    if st.session_state.current_part == -1:
+        st.session_state.current_part = 0
+        st.session_state.full_log = f"**주제:** {st.session_state.topic}"
+    
     st.markdown(st.session_state.full_log, unsafe_allow_html=True)
-    st.info("자, 이제 어떤 선택을 해볼까요?")
-    col1, col2 = st.columns(2)
-    if col1.button(f"A: {part['choice_a']}", use_container_width=True, key=f"A_{st.session_state.current_part}"):
-        st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1}:** {part['choice_a']}"
-        st.session_state.stage = 'debate'
-        st.rerun()
-    if col2.button(f"B: {part['choice_b']}", use_container_width=True, key=f"B_{st.session_state.current_part}"):
-        st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1}:** {part['choice_b']}"
-        st.session_state.stage = 'debate'
-        st.rerun()
+    
+    with st.spinner(f"AI가 이야기 #{st.session_state.current_part + 1}을(를) 생성 중입니다..."):
+        history_summary = st.session_state.full_log[-500:] if st.session_state.current_part > 0 else ""
+        story_part = generate_story_part(st.session_state.topic, history_summary)
+        choices_text = generate_choices_for_story(story_part)
+
+    st.markdown(f"### 이야기 #{st.session_state.current_part + 1}")
+    st.write(story_part)
+    
+    try:
+        match_a = re.search(r"A:\s*(.*)", choices_text, re.DOTALL)
+        match_b = re.search(r"B:\s*(.*)", choices_text, re.DOTALL)
+        if not (match_a and match_b): raise ValueError("선택지 형식 오류")
+        choice_a_text = match_a.group(1).strip()
+        choice_b_text = match_b.group(1).strip()
+        
+        st.info("자, 이제 어떤 선택을 해볼까요?")
+        col1, col2 = st.columns(2)
+        if col1.button(f"A: {choice_a_text}", use_container_width=True, key=f"A_{st.session_state.current_part}"):
+            st.session_state.full_log += f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{story_part}\n\n**>> 나의 선택:** {choice_a_text}"
+            st.session_state.stage = 'debate'
+            st.rerun()
+        if col2.button(f"B: {choice_b_text}", use_container_width=True, key=f"B_{st.session_state.current_part}"):
+            st.session_state.full_log += f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{story_part}\n\n**>> 나의 선택:** {choice_b_text}"
+            st.session_state.stage = 'debate'
+            st.rerun()
+    except Exception as e:
+        st.error(f"선택지를 만드는 데 실패했어요. AI의 답변 형식이 달랐을 수 있어요.")
+        if st.button("이야기 다시 만들기"):
+            st.rerun()
 
 elif st.session_state.stage == 'debate':
     log_parts = st.session_state.full_log.split('\n\n')
@@ -158,9 +172,9 @@ elif st.session_state.stage == 'debate':
     elif st.session_state.debate_turns == 4:
         st.info("토론이 완료되었어요. 아래 버튼을 눌러 다음으로 넘어가요!")
         st.session_state.current_part += 1
-        if st.button("다음 이야기로" if st.session_state.current_part < 4 else "최종 정리 보기"):
+        if st.button("다음 이야기로" if st.session_state.current_part < st.session_state.MAX_CHOICES else "최종 정리 보기"):
             st.session_state.debate_turns = 0
-            if st.session_state.current_part >= 4:
+            if st.session_state.current_part >= st.session_state.MAX_CHOICES:
                 st.session_state.stage = 'conclusion'
             else:
                 st.session_state.stage = 'story'
