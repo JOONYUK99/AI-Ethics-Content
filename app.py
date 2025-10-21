@@ -1,7 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
 import re
-import urllib.parse
 
 # --- 1. AI 핵심 기능 함수 정의 ---
 def get_model(model_name='gemini-pro'):
@@ -18,16 +17,6 @@ def generate_story_part(topic, history_summary=""):
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e: return f"이야기 생성 중 오류: {e}"
-
-def generate_image_keywords(story_part):
-    model = get_model()
-    prompt = f"다음 한국어 문장의 핵심 내용을 대표하는 영어 단어 2개를 쉼표로 구분하여 짧게 요약해줘. 예: '슬픈 아이가 로봇과 함께 있다' -> 'sad child, robot'\n\n문장: {story_part}"
-    try:
-        response = model.generate_content(prompt)
-        keywords = [keyword.strip() for keyword in response.text.strip().replace('*','').split(',')]
-        return ",".join(keywords)
-    except Exception:
-        return "AI,robot"
 
 def generate_choices_for_story(story_part):
     model = get_model()
@@ -94,14 +83,13 @@ def restart_lesson():
     st.session_state.debate_turns = 0
 
 if st.session_state.stage == 'start':
-    # <--- 수정: 주제 선택(selectbox) 대신 시나리오 직접 입력(text_area)으로 변경
     st.info("AI 윤리 교육 콘텐츠로 만들고 싶은 실제 사례, 뉴스 기사 등을 아래에 입력해주세요.")
     teacher_text = st.text_area("시나리오 입력:", height=150, placeholder="예시: AI 그림 대회에서 인공지능으로 그린 그림이 1등을 차지해서 논란이 되었습니다...")
     if st.button("이 내용으로 교육 콘텐츠 생성하기"):
         if not teacher_text:
             st.warning("시나리오를 입력해주세요.")
         else:
-            st.session_state.topic = teacher_text # 입력된 내용을 주제로 설정
+            st.session_state.topic = teacher_text
             st.session_state.full_log = f"**입력 내용:** {st.session_state.topic[:70]}..."
             st.session_state.stage = 'story'
             st.rerun()
@@ -111,15 +99,8 @@ elif st.session_state.stage == 'story':
     st.markdown(f"### ✨ 이야기 #{st.session_state.choice_count + 1} ✨")
     with st.spinner(f"AI가 이야기 #{st.session_state.choice_count + 1}을(를) 만들고 있어요..."):
         story_part = generate_story_part(st.session_state.topic, history_summary)
-        keywords = generate_image_keywords(story_part)
         choices_text = generate_choices_for_story(story_part)
     
-    try:
-        encoded_keywords = urllib.parse.quote(keywords)
-        st.image(f"https://placehold.co/600x300/E8E8E8/313131?text={encoded_keywords}", caption=f"AI가 상상한 이미지: {keywords}")
-    except Exception:
-        pass
-        
     st.write(story_part)
     st.session_state.current_story_part_log = f"### 이야기 #{st.session_state.choice_count + 1}\n{story_part}"
     
