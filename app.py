@@ -1,10 +1,11 @@
 import streamlit as st
 import google.generativeai as genai
 import re
+import os
 
-# --- 1. RAG(검색 증강 생성)를 위한 지식 베이스 및 검색 기능 ---
+# --- 1. RAG(검색 증강 생성)를 위한 지식 베이스 ---
 
-# 프로토타입으로 사용할 AI 윤리 지식 베이스(Knowledge Base) - 예시 추가
+# 프로토타입으로 사용할 AI 윤리 지식 베이스(Knowledge Base)
 AI_ETHICS_KB = {
     "ai_art_copyright": {
         "title": "🎨 AI 예술과 저작권",
@@ -33,315 +34,295 @@ AI_ETHICS_KB = {
     }
 }
 
-def retrieve_context(user_input, kb):
-    """사용자 입력과 지식 베이스를 기반으로 관련 정보를 검색하는 함수 (간단한 키워드 기반)"""
-    if any(keyword in user_input for keyword in ["그림", "미술", "저작권", "대회"]):
-        return kb["ai_art_copyright"]["content"]
-    if any(keyword in user_input for keyword in ["자율주행", "자동차", "사고", "딜레마"]):
-        return kb["autonomous_vehicle_dilemma"]["content"]
-    if any(keyword in user_input for keyword in ["튜터", "학습", "개인정보", "로봇"]):
-        return kb["ai_tutor_privacy"]["content"]
-    if any(keyword in user_input for keyword in ["딥페이크", "가짜", "뉴스", "영상", "소문"]):
-        return kb["deepfake_news"]["content"]
-    if any(keyword in user_input for keyword in ["추천", "편향", "차별", "필터", "알고리즘"]):
-        return kb["algorithmic_bias"]["content"]
-    return None # 관련 정보를 찾지 못하면 None을 반환
-
-# --- 2. AI 핵심 기능 함수 정의 ---
+# --- 2. 공통 함수 정의 ---
+# API 키 설정
+try:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+except Exception:
+    st.error("⚠️ 구글 API 키를 설정해주세요! (Streamlit secrets)")
+    st.stop()
 
 def get_model():
     """Gemini 모델을 가져오는 함수"""
     return genai.GenerativeModel('gemini-pro-latest')
 
-def transform_scenario(teacher_input, context): # RAG를 위해 context 매개변수 추가
-    """교사의 입력과 검색된 정보를 바탕으로 대화형 시나리오를 생성하는 함수"""
-    model = get_model()
-    
-    context_prompt_part = ""
-    if context:
-        context_prompt_part = f"# 참고 자료 (이 내용을 바탕으로 시나리오를 더 구체적으로 만들어주세요):\n{context}\n\n"
-
-    prompt = (
-        "당신은 초등학생 고학년 눈높이에 맞춰 AI 윤리 교육용 인터랙티브 시나리오를 작성하는 전문 작가입니다.\n"
-        "아래 '입력 내용'과 '참고 자료'를 바탕으로, 학생들이 흥미를 느끼고 깊이 몰입할 수 있는 이야기를 만들어 주세요.\n"
-        "이야기는 총 4개의 파트로 구성되며, 각 파트가 끝날 때마다 주인공이 AI 윤리와 관련하여 깊이 고민할 수 있는 두 가지 선택지를 제시해야 합니다.\n\n"
-        "# 지시사항:\n"
-        "1. 이야기는 전체적으로 하나의 완결된 흐름을 가져야 합니다.\n"
-        "2. 각 파트의 내용은 학생들이 감정적으로 이입할 수 있도록 구체적이고 생생하게 묘사해주세요.\n"
-        "3. 절대로 설명이나 추가적인 대화 없이, 오직 아래 '# 필수 출력 형식'에 맞춰서만 응답해주세요.\n\n"
-        "# 필수 출력 형식:\n"
-        "[STORY 1] (첫 번째 이야기 내용) [CHOICE 1A] (A 선택지) [CHOICE 1B] (B 선택지)\n"
-        "---\n"
-        "[STORY 2] (두 번째 이야기 내용) [CHOICE 2A] (A 선택지) [CHOICE 2B] (B 선택지)\n"
-        "---\n"
-        "[STORY 3] (세 번째 이야기 내용) [CHOICE 3A] (A 선택지) [CHOICE 3B] (B 선택지)\n"
-        "---\n"
-        "[STORY 4] (네 번째 이야기 내용) [CHOICE 4A] (A 선택지) [CHOICE 4B] (B 선택지)\n\n"
-        f"{context_prompt_part}"
-        f"--- 입력 내용 ---\n{teacher_input}"
-    )
+@st.cache_data
+def load_knowledge_base(file_path):
+    """지정된 경로의 텍스트 파일을 읽어 지식 베이스로 사용합니다."""
     try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        st.error(f"시나리오 생성 중 오류가 발생했습니다: {e}")
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
         return None
 
-def start_debate(history, choice):
-    """학생의 선택에 대한 토론을 시작하는 함수"""
-    model = get_model()
-    prompt = (
-        "당신은 학생들을 아주 아끼는 다정한 AI 윤리 선생님입니다.\n"
-        "학생의 선택을 격려하며, 왜 그런 선택을 했는지 자연스럽게 질문하며 토론을 시작해주세요.\n"
-        "초등학생 눈높이에 맞춰 쉽고 따뜻한 말투를 사용해주세요.\n\n"
-        f"--- 지금까지의 이야기와 학생의 선택 ---\n{history}\n학생의 선택: {choice}\n\n"
-        "AI 선생님의 따뜻한 첫 질문:"
-    )
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        return f"토론 시작 중 오류가 발생했습니다: {e}"
+# --- 3. RAG 비교 데모 페이지 함수 ---
+def run_comparison_demo():
+    """RAG 효과 비교 데모 페이지를 실행하는 함수"""
+    st.header("✨ RAG 효과, 한눈에 비교하기")
+    st.info("같은 질문에 대해 RAG(지식 베이스 참고)를 사용했을 때와 아닐 때, AI의 답변이 어떻게 달라지는지 비교하는 데모입니다.")
 
-def continue_debate(debate_history):
-    """진행된 토론 내용에 이어 다음 질문을 생성하는 함수"""
-    model = get_model()
-    prompt = (
-        "당신은 다정한 AI 윤리 선생님입니다. 학생의 의견에 깊이 공감하며, 생각의 폭을 넓힐 수 있는 다음 질문을 해주세요.\n"
-        "학생의 의견을 존중하는 태도를 보여주세요.\n\n"
-        f"--- 지금까지의 토론 내용 ---\n{debate_history}\n\n"
-        "AI 선생님의 다음 질문:"
-    )
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        return f"토론 중 오류가 발생했습니다: {e}"
+    problem_scenario = "AI 그림의 저작권은 AI를 만든 개발자에게 있나요?"
+    kb_file = "knowledge_base/ai_art_copyright.txt"
 
-def generate_conclusion(final_history):
-    """모든 활동을 마무리하는 격려 메시지를 생성하는 함수"""
-    model = get_model()
-    prompt = (
-        "당신은 학생의 성장을 지켜본 다정한 AI 윤리 선생님입니다.\n"
-        "아래 내용은 한 학생이 AI 윤리 문제에 대해 총 4번의 선택과 토론을 거친 전체 기록입니다.\n"
-        "이 기록을 바탕으로 학생의 고민 과정을 칭찬하고, 정답을 찾는 것보다 스스로 생각하는 과정 그 자체가 얼마나 중요한지를 강조하는 따뜻하고 격려가 되는 마무리 메시지를 작성해주세요.\n\n"
-        f"--- 전체 기록 ---\n{final_history}"
-    )
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        return f"결론 생성 중 오류가 발생했습니다: {e}"
-
-# --- 3. 시나리오 파싱 함수 개선 ---
-def parse_and_store_scenario(generated_text):
-    """AI가 생성한 텍스트를 파싱하여 세션 상태에 저장하는 함수 (개선된 버전)"""
-    st.session_state.full_scenario = []
-    parts = generated_text.split('---')
-    if len(parts) < 4:
-        return False
-
-    for i, part in enumerate(parts):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            story_match = re.search(r"\[STORY\s?\d\](.*?)(?=\[CHOICE\s?\dA\])", part, re.DOTALL)
-            choice_a_match = re.search(r"\[CHOICE\s?\dA\](.*?)(?=\[CHOICE\s?\dB\])", part, re.DOTALL)
-            choice_b_match = re.search(r"\[CHOICE\s?\dB\](.*)", part, re.DOTALL)
-
-            if story_match and choice_a_match and choice_b_match:
-                story = story_match.group(1).strip()
-                choice_a = choice_a_match.group(1).strip()
-                choice_b = choice_b_match.group(1).strip()
-                st.session_state.full_scenario.append({"story": story, "choice_a": choice_a, "choice_b": choice_b})
-        except Exception:
-            continue
-    return len(st.session_state.full_scenario) >= 4
-
-# --- 4. Streamlit 앱 UI 및 상태 관리 ---
-st.set_page_config(page_title="AI 윤리 교육 콘텐츠", page_icon="✨", layout="centered")
-st.title("✨ 초등학생을 위한 AI 윤리 교육 (RAG 프로토타입)")
-
-try:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-except Exception:
-    st.error("⚠️ 구글 API 키를 설정해주세요! (Streamlit secrets)")
-    st.info("좌측 하단의 'Secrets' 버튼을 눌러 `GOOGLE_API_KEY = '실제API키'` 형식으로 API 키를 등록할 수 있습니다.")
-    st.stop()
-
-# 세션 상태 초기화
-if 'stage' not in st.session_state:
-    st.session_state.stage = 'start'
-if 'full_scenario' not in st.session_state:
-    st.session_state.full_scenario = []
-if 'full_log' not in st.session_state:
-    st.session_state.full_log = ""
-if 'current_part' not in st.session_state:
-    st.session_state.current_part = -1
-if 'debate_turns' not in st.session_state:
-    st.session_state.debate_turns = 0
-if 'teacher_input' not in st.session_state:
-    st.session_state.teacher_input = ""
-
-def restart_lesson():
-    """수업을 처음부터 다시 시작하는 함수"""
-    st.session_state.stage = 'start'
-    st.session_state.full_scenario = []
-    st.session_state.full_log = ""
-    st.session_state.current_part = -1
-    st.session_state.debate_turns = 0
-    st.session_state.teacher_input = ""
-
-
-# --- 각 단계별 화면 구성 ---
-
-if st.session_state.stage == 'start':
-    st.info("AI 윤리 교육 콘텐츠로 만들고 싶은 실제 사례, 뉴스 기사 등을 자유롭게 입력하거나, 아래 예시 주제를 선택하여 시작해보세요.")
-    
-    # RAG 기능 ON/OFF 토글 스위치 추가
-    use_rag = st.toggle("✅ RAG 기능 사용하기 (지식 베이스 참고)", value=True)
-    st.caption("RAG 기능을 켜면, AI가 전문 자료를 참고하여 더 깊이 있는 시나리오를 만듭니다. 끄면 AI의 상상력만으로 시나리오를 만듭니다.")
-    
     st.write("---")
-    
-    # 예시 주제 선택 UI
-    example_options = {AI_ETHICS_KB[key]["title"]: key for key in AI_ETHICS_KB}
-    options_list = ["주제 직접 입력..."] + list(example_options.keys())
-    selected_topic_title = st.selectbox("예시 주제 선택 또는 직접 입력:", options_list)
+    st.subheader("❓ 질문 시나리오")
+    st.markdown(f"> **{problem_scenario}**")
+    st.write("---")
 
-    if selected_topic_title != "주제 직접 입력...":
-        selected_key = example_options[selected_topic_title]
-        st.session_state.teacher_input = AI_ETHICS_KB[selected_key]["example_prompt"]
-    
-    teacher_text = st.text_area(
-        "시나리오 소재:",
-        value=st.session_state.teacher_input,
-        height=150,
-        key="teacher_input_area"
-    )
+    knowledge_base = load_knowledge_base(kb_file)
 
-    if st.button("이 내용으로 교육 콘텐츠 생성하기"):
-        if not teacher_text.strip():
-            st.warning("시나리오 소재를 입력해주세요.")
-        else:
-            st.session_state.teacher_input = teacher_text
-            with st.spinner("AI가 입력하신 내용을 바탕으로 멋진 시나리오를 만들고 있어요. 잠시만 기다려주세요..."):
-                
-                # RAG 파이프라인 제어
-                retrieved_knowledge = None
-                if use_rag:
-                    retrieved_knowledge = retrieve_context(st.session_state.teacher_input, AI_ETHICS_KB)
-                    if retrieved_knowledge:
-                        st.success("✅ RAG 활성화: 관련 지식 베이스를 참고하여 시나리오를 생성합니다.")
-                        st.expander("AI가 참고한 자료 보기").write(retrieved_knowledge)
-                    else:
-                        st.info("ℹ️ RAG 활성화: 하지만 입력과 관련된 지식 베이스를 찾지 못했어요. AI가 자체 지식으로 생성합니다.")
-                else:
-                    st.warning("❌ RAG 비활성화: AI가 지식 베이스 참고 없이 시나리오를 생성합니다.")
+    if knowledge_base is None:
+        st.error(f"'knowledge_base/ai_art_copyright.txt' 파일을 찾을 수 없습니다. 폴더와 파일이 올바르게 생성되었는지 확인해주세요.")
+        return
 
-                scenario_text = transform_scenario(st.session_state.teacher_input, retrieved_knowledge)
-                
-                if scenario_text and parse_and_store_scenario(scenario_text):
-                    st.session_state.full_log = f"**입력 내용:** {st.session_state.teacher_input[:70]}..."
-                    st.session_state.current_part = 0
-                    st.session_state.stage = 'story'
-                    st.rerun()
-                else:
-                    st.error("AI가 이야기를 만들다 조금 힘들어하네요. 입력 내용을 조금 더 구체적으로 작성한 후 다시 시도해주세요.")
-                    if scenario_text:
-                        st.code(scenario_text, language='text')
-
-elif st.session_state.stage == 'story':
-    if not st.session_state.full_scenario or st.session_state.current_part < 0:
-        st.warning("이야기를 불러오는 데 문제가 발생했어요. 처음부터 다시 시작해주세요.")
-        if st.button("처음으로 돌아가기"):
-            restart_lesson()
-            st.rerun()
-    else:
-        part = st.session_state.full_scenario[st.session_state.current_part]
-        current_story = f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{part['story']}"
-        
-        if current_story not in st.session_state.full_log:
-            st.session_state.full_log += current_story
-            
-        st.markdown(st.session_state.full_log, unsafe_allow_html=True)
-        st.info("자, 이제 어떤 선택을 해볼까요?")
-        
+    if st.button("RAG 전/후 비교 결과 생성하기", use_container_width=True):
         col1, col2 = st.columns(2)
-        choice_key_prefix = f"part_{st.session_state.current_part}"
-    
-        if col1.button(f"**선택 A:** {part['choice_a']}", use_container_width=True, key=f"{choice_key_prefix}_A"):
-            st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (A):** {part['choice_a']}"
-            st.session_state.stage = 'debate'
-            st.rerun()
-    
-        if col2.button(f"**선택 B:** {part['choice_b']}", use_container_width=True, key=f"{choice_key_prefix}_B"):
-            st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (B):** {part['choice_b']}"
-            st.session_state.stage = 'debate'
-            st.rerun()
 
-elif st.session_state.stage == 'debate':
-    log_parts = re.split(r'\n\n(?=---\n\n|>> 나의 선택|AI 선생님:|나 \(의견)', st.session_state.full_log)
-    for p in log_parts:
-        p = p.strip()
-        if p.startswith(">> 나의 선택"): st.chat_message("user", avatar="🙋‍♂️").write(p)
-        elif p.startswith("AI 선생님:"): st.chat_message("assistant", avatar="🤖").write(p.replace("AI 선생님:", "**AI 선생님:**"))
-        elif p.startswith("나 (의견"): st.chat_message("user", avatar="🙋‍♂️").write(p)
-        else: st.markdown(p, unsafe_allow_html=True)
+        def generate_response(prompt):
+            model = get_model()
+            try:
+                response = model.generate_content(prompt)
+                return response.text.strip()
+            except Exception as e:
+                return f"응답 생성 중 오류 발생: {e}"
 
-    if st.session_state.debate_turns == 0:
-        with st.chat_message("assistant", avatar="🤖"):
-            with st.spinner("AI 선생님이 질문을 준비하고 있어요..."):
-                choice = st.session_state.full_log.split('>> 나의 선택')[-1]
-                question = start_debate(st.session_state.full_log, choice)
-                st.session_state.full_log += f"\n\nAI 선생님: {question}"
-                st.session_state.debate_turns = 1
-                st.rerun()
-    elif st.session_state.debate_turns == 1:
-        if reply := st.chat_input("선생님의 질문에 답변해주세요:"):
-            st.session_state.full_log += f"\n\n나 (의견 1): {reply}"
-            st.session_state.debate_turns = 2
-            st.rerun()
-    elif st.session_state.debate_turns == 2:
-        with st.chat_message("assistant", avatar="🤖"):
-            with st.spinner("AI 선생님이 다음 질문을 생각 중이에요..."):
-                question = continue_debate(st.session_state.full_log)
-                st.session_state.full_log += f"\n\nAI 선생님: {question}"
-                st.session_state.debate_turns = 3
-                st.rerun()
-    elif st.session_state.debate_turns == 3:
-        if reply := st.chat_input("선생님의 질문에 답변해주세요:"):
-            st.session_state.full_log += f"\n\n나 (의견 2): {reply}"
-            st.session_state.debate_turns = 4
-            st.rerun()
-    elif st.session_state.debate_turns == 4:
-        st.info("토론이 완료되었어요. 아래 버튼을 눌러 다음으로 넘어가요!")
-        is_last_part = st.session_state.current_part >= len(st.session_state.full_scenario) - 1
+        with col1:
+            st.subheader("❌ RAG 미적용 (AI의 자체 판단)")
+            st.warning("AI가 학습한 내용을 바탕으로 '그럴듯하게' 답변하지만, 부정확할 수 있습니다.")
+            prompt_without_rag = f"초등학생이 이해하기 쉽게 설명해줘: {problem_scenario}"
+            with st.spinner("AI가 상상력으로 답변을 만들고 있어요..."):
+                st.markdown(generate_response(prompt_without_rag))
+
+        with col2:
+            st.subheader("✅ RAG 적용 (외부 자료 참고)")
+            st.success("AI가 제공된 '참고 자료'를 바탕으로, 사실에 근거하여 정확한 답변을 생성합니다.")
+            with st.expander("📄 AI에게 제공된 참고 자료 보기"):
+                st.text(knowledge_base)
+            prompt_with_rag = (
+                "아래 '참고 자료'를 바탕으로 질문에 대해 초등학생이 이해하기 쉽게 설명해줘.\n\n"
+                f"# 참고 자료:\n{knowledge_base}\n\n"
+                f"# 질문:\n{problem_scenario}"
+            )
+            with st.spinner("AI가 참고 자료를 읽고 답변을 만들고 있어요..."):
+                st.markdown(generate_response(prompt_with_rag))
+
+# --- 4. 교육 콘텐츠 생성 페이지 함수 ---
+def run_main_app():
+    """메인 교육 콘텐츠 생성 애플리케이션을 실행하는 함수"""
+    st.header("✨ 초등학생을 위한 AI 윤리 교육 콘텐츠 생성")
+
+    # 세션 상태 초기화
+    if 'stage' not in st.session_state or st.session_state.get('app_mode') != 'main':
+        st.session_state.stage = 'start'
+        st.session_state.full_scenario = []
+        st.session_state.full_log = ""
+        st.session_state.current_part = -1
+        st.session_state.debate_turns = 0
+        st.session_state.teacher_input = ""
+        st.session_state.app_mode = 'main' # 현재 모드 저장
+
+    def restart_lesson():
+        st.session_state.stage = 'start'
+        st.session_state.full_scenario = []
+        st.session_state.full_log = ""
+        st.session_state.current_part = -1
+        st.session_state.debate_turns = 0
+        st.session_state.teacher_input = ""
+    
+    # 함수 내에서만 필요한 함수들 정의
+    def retrieve_context(user_input, kb):
+        if any(keyword in user_input for keyword in ["그림", "미술", "저작권", "대회"]): return kb["ai_art_copyright"]["content"]
+        if any(keyword in user_input for keyword in ["자율주행", "자동차", "사고"]): return kb["autonomous_vehicle_dilemma"]["content"]
+        if any(keyword in user_input for keyword in ["튜터", "학습", "개인정보"]): return kb["ai_tutor_privacy"]["content"]
+        if any(keyword in user_input for keyword in ["딥페이크", "가짜", "영상"]): return kb["deepfake_news"]["content"]
+        if any(keyword in user_input for keyword in ["추천", "편향", "알고리즘"]): return kb["algorithmic_bias"]["content"]
+        return None
+
+    def transform_scenario(teacher_input, context):
+        model = get_model()
+        context_prompt_part = f"# 참고 자료:\n{context}\n\n" if context else ""
+        prompt = (
+            "당신은 초등학생 고학년 눈높이에 맞춰 AI 윤리 교육용 인터랙티브 시나리오를 작성하는 전문 작가입니다.\n"
+            "아래 '입력 내용'과 '참고 자료'를 바탕으로, 학생들이 몰입할 수 있는 완결된 이야기를 만들어 주세요.\n"
+
+            "이야기는 총 4개의 파트로 구성되며, 각 파트 끝에는 주인공의 고민이 드러나는 두 가지 선택지를 제시해야 합니다.\n\n"
+            "# 필수 출력 형식:\n"
+            "[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n"
+            "[STORY 2] ... [CHOICE 2A] ... [CHOICE 2B] ...\n---\n"
+            "[STORY 3] ... [CHOICE 3A] ... [CHOICE 3B] ...\n---\n"
+            "[STORY 4] ... [CHOICE 4A] ... [CHOICE 4B] ...\n\n"
+            f"{context_prompt_part}"
+            f"--- 입력 내용 ---\n{teacher_input}"
+        )
+        try:
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            st.error(f"시나리오 생성 중 오류: {e}")
+            return None
+
+    def parse_and_store_scenario(generated_text):
+        st.session_state.full_scenario = []
+        parts = generated_text.split('---')
+        if len(parts) < 4: return False
+        for i, part in enumerate(parts):
+            try:
+                story = re.search(r"\[STORY\s?\d\](.*?)(?=\[CHOICE\s?\dA\])", part, re.DOTALL).group(1).strip()
+                choice_a = re.search(r"\[CHOICE\s?\dA\](.*?)(?=\[CHOICE\s?\dB\])", part, re.DOTALL).group(1).strip()
+                choice_b = re.search(r"\[CHOICE\s?\dB\](.*)", part, re.DOTALL).group(1).strip()
+                st.session_state.full_scenario.append({"story": story, "choice_a": choice_a, "choice_b": choice_b})
+            except Exception:
+                continue
+        return len(st.session_state.full_scenario) >= 4
+
+    # (Debate와 Conclusion 함수는 여기에 위치)
+    def start_debate(history, choice):
+        model = get_model()
+        prompt = (
+            "당신은 학생들을 아주 아끼는 다정한 AI 윤리 선생님입니다. 학생의 선택을 격려하며 토론을 시작해주세요.\n"
+            f"--- 지금까지의 이야기와 학생의 선택 ---\n{history}\n학생의 선택: {choice}\n\nAI 선생님의 따뜻한 첫 질문:")
+        try:
+            response = model.generate_content(prompt); return response.text.strip()
+        except Exception as e: return f"토론 시작 중 오류: {e}"
+
+    def continue_debate(debate_history):
+        model = get_model()
+        prompt = (
+            "당신은 다정한 AI 윤리 선생님입니다. 학생의 의견에 공감하며 토론을 이어가주세요.\n"
+            f"--- 지금까지의 토론 내용 ---\n{debate_history}\n\nAI 선생님의 다음 질문:")
+        try:
+            response = model.generate_content(prompt); return response.text.strip()
+        except Exception as e: return f"토론 중 오류: {e}"
+
+    def generate_conclusion(final_history):
+        model = get_model()
+        prompt = (
+            "당신은 학생의 성장을 지켜본 다정한 AI 윤리 선생님입니다.\n"
+            "다음은 한 학생이 AI 윤리 문제에 대해 총 4번의 선택과 토론을 거친 전체 기록입니다. 이 기록을 바탕으로 학생의 고민 과정을 칭찬하고, 정답 찾기보다 과정 자체가 중요했다는 점을 강조하는 따뜻하고 격려가 되는 마무리 메시지를 작성해주세요.\n"
+            f"--- 전체 기록 ---\n{final_history}")
+        try:
+            response = model.generate_content(prompt); return response.text.strip()
+        except Exception as e: return f"결론 생성 중 오류: {e}"
+
+    # UI 로직 시작
+    if st.session_state.stage == 'start':
+        st.info("AI 윤리 교육 콘텐츠로 만들고 싶은 사례를 입력하거나, 아래 예시 주제를 선택하여 시작해보세요.")
+        use_rag = st.toggle("✅ RAG 기능 사용하기 (지식 베이스 참고)", value=True, help="RAG 기능을 켜면, AI가 전문 자료를 참고하여 더 깊이 있는 시나리오를 만듭니다.")
+        st.write("---")
         
-        if st.button("다음 이야기로" if not is_last_part else "최종 정리 보기"):
-            st.session_state.debate_turns = 0
-            st.session_state.current_part += 1
-            if is_last_part:
-                st.session_state.stage = 'conclusion'
+        example_options = {AI_ETHICS_KB[key]["title"]: key for key in AI_ETHICS_KB}
+        options_list = ["주제 직접 입력..."] + list(example_options.keys())
+        selected_topic_title = st.selectbox("예시 주제 선택 또는 직접 입력:", options_list)
+
+        if selected_topic_title != "주제 직접 입력...":
+            st.session_state.teacher_input = AI_ETHICS_KB[example_options[selected_topic_title]]["example_prompt"]
+        
+        teacher_text = st.text_area("시나리오 소재:", value=st.session_state.teacher_input, height=150, key="teacher_input_area")
+
+        if st.button("이 내용으로 교육 콘텐츠 생성하기"):
+            if not teacher_text.strip():
+                st.warning("시나리오 소재를 입력해주세요.")
             else:
-                st.session_state.stage = 'story'
-            st.rerun()
+                st.session_state.teacher_input = teacher_text
+                with st.spinner("AI가 시나리오를 만들고 있어요..."):
+                    retrieved_knowledge = retrieve_context(st.session_state.teacher_input, AI_ETHICS_KB) if use_rag else None
+                    if use_rag:
+                        if retrieved_knowledge:
+                            st.success("✅ RAG 활성화: 관련 지식 베이스를 참고합니다.")
+                        else:
+                             st.info("ℹ️ RAG 활성화: 하지만 관련된 지식 베이스를 찾지 못했어요.")
+                    else:
+                        st.warning("❌ RAG 비활성화: AI의 자체 지식으로 생성합니다.")
+                    
+                    scenario_text = transform_scenario(st.session_state.teacher_input, retrieved_knowledge)
+                    if scenario_text and parse_and_store_scenario(scenario_text):
+                        st.session_state.full_log = f"**입력 내용:** {st.session_state.teacher_input[:70]}..."
+                        st.session_state.current_part = 0
+                        st.session_state.stage = 'story'
+                        st.rerun()
+                    else:
+                        st.error("AI가 이야기를 만들다 힘들어하네요. 내용을 조금 더 구체적으로 작성 후 다시 시도해주세요.")
 
-elif st.session_state.stage == 'conclusion':
-    st.markdown("### ✨ 우리의 전체 이야기와 토론 여정 ✨")
-    st.markdown(st.session_state.full_log, unsafe_allow_html=True)
-    st.markdown("---")
-    
-    with st.spinner("AI 선생님이 우리의 멋진 여정을 정리하고 있어요..."):
-        conclusion = generate_conclusion(st.session_state.full_log)
-        st.balloons()
-        st.success("모든 이야기가 끝났어요! 스스로 생각하고 답을 찾아가는 과정, 정말 멋졌어요!")
-        
-        st.markdown("### 최종 정리")
-        st.write(conclusion)
+    elif st.session_state.stage == 'story':
+        if not st.session_state.full_scenario or st.session_state.current_part < 0:
+            st.warning("이야기를 불러오는 데 문제가 발생했어요. 처음부터 다시 시작해주세요.")
+            if st.button("처음으로 돌아가기"): restart_lesson(); st.rerun()
+        else:
+            part = st.session_state.full_scenario[st.session_state.current_part]
+            current_story = f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{part['story']}"
+            if current_story not in st.session_state.full_log: st.session_state.full_log += current_story
+            st.markdown(st.session_state.full_log, unsafe_allow_html=True)
+            st.info("자, 이제 어떤 선택을 해볼까요?")
+            col1, col2 = st.columns(2)
+            if col1.button(f"**선택 A:** {part['choice_a']}", use_container_width=True, key=f"A_{st.session_state.current_part}"):
+                st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (A):** {part['choice_a']}"; st.session_state.stage = 'debate'; st.rerun()
+            if col2.button(f"**선택 B:** {part['choice_b']}", use_container_width=True, key=f"B_{st.session_state.current_part}"):
+                st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (B):** {part['choice_b']}"; st.session_state.stage = 'debate'; st.rerun()
 
-    if st.button("새로운 주제로 다시 시작하기"):
-        restart_lesson()
-        st.rerun()
+    elif st.session_state.stage == 'debate':
+        log_parts = re.split(r'\n\n(?=---\n\n|>> 나의 선택|AI 선생님:|나 \(의견)', st.session_state.full_log)
+        for p in log_parts:
+            p = p.strip()
+            if p.startswith(">> 나의 선택"): st.chat_message("user", avatar="🙋‍♂️").write(p)
+            elif p.startswith("AI 선생님:"): st.chat_message("assistant", avatar="🤖").write(p.replace("AI 선생님:", "**AI 선생님:**"))
+            elif p.startswith("나 (의견"): st.chat_message("user", avatar="🙋‍♂️").write(p)
+            else: st.markdown(p, unsafe_allow_html=True)
+
+        if st.session_state.debate_turns == 0:
+            with st.chat_message("assistant", avatar="🤖"):
+                with st.spinner("AI 선생님이 질문을 준비하고 있어요..."):
+                    choice = st.session_state.full_log.split('>> 나의 선택')[-1]
+                    question = start_debate(st.session_state.full_log, choice)
+                    st.session_state.full_log += f"\n\nAI 선생님: {question}"; st.session_state.debate_turns = 1; st.rerun()
+        elif st.session_state.debate_turns == 1:
+            if reply := st.chat_input("선생님의 질문에 답변해주세요:"):
+                st.session_state.full_log += f"\n\n나 (의견 1): {reply}"; st.session_state.debate_turns = 2; st.rerun()
+        elif st.session_state.debate_turns == 2:
+            with st.chat_message("assistant", avatar="🤖"):
+                with st.spinner("AI 선생님이 다음 질문을 생각 중이에요..."):
+                    question = continue_debate(st.session_state.full_log)
+                    st.session_state.full_log += f"\n\nAI 선생님: {question}"; st.session_state.debate_turns = 3; st.rerun()
+        elif st.session_state.debate_turns == 3:
+            if reply := st.chat_input("선생님의 질문에 답변해주세요:"):
+                st.session_state.full_log += f"\n\n나 (의견 2): {reply}"; st.session_state.debate_turns = 4; st.rerun()
+        elif st.session_state.debate_turns == 4:
+            st.info("토론이 완료되었어요. 아래 버튼을 눌러 다음으로 넘어가요!")
+            is_last_part = st.session_state.current_part >= len(st.session_state.full_scenario) - 1
+            if st.button("다음 이야기로" if not is_last_part else "최종 정리 보기"):
+                st.session_state.debate_turns = 0; st.session_state.current_part += 1
+                st.session_state.stage = 'conclusion' if is_last_part else 'story'
+                st.rerun()
+
+    elif st.session_state.stage == 'conclusion':
+        st.markdown("### ✨ 우리의 전체 이야기와 토론 여정 ✨")
+        st.markdown(st.session_state.full_log, unsafe_allow_html=True)
+        st.markdown("---")
+        with st.spinner("AI 선생님이 우리의 멋진 여정을 정리하고 있어요..."):
+            conclusion = generate_conclusion(st.session_state.full_log)
+            st.balloons(); st.success("모든 이야기가 끝났어요! 정말 수고 많았어요!")
+            st.markdown("### 최종 정리"); st.write(conclusion)
+        if st.button("새로운 주제로 다시 시작하기"): restart_lesson(); st.rerun()
+
+# --- 5. 메인 앱 라우팅 ---
+st.sidebar.title("메뉴")
+app_mode = st.sidebar.radio(
+    "원하는 기능을 선택하세요.",
+    ("교육 콘텐츠 생성", "RAG 효과 비교 데모")
+)
+
+st.sidebar.write("---")
+st.sidebar.info("이 앱은 초등학생의 AI 윤리 교육을 위해 제작되었습니다.")
+
+if app_mode == "교육 콘텐츠 생성":
+    run_main_app()
+elif app_mode == "RAG 효과 비교 데모":
+    if 'app_mode' not in st.session_state or st.session_state.app_mode != 'demo':
+        # 데모 모드로 전환 시, 메인 앱의 상태 초기화
+        keys_to_clear = ['stage', 'full_scenario', 'full_log', 'current_part', 'debate_turns', 'teacher_input']
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.session_state.app_mode = 'demo'
+
+    run_comparison_demo()
 
