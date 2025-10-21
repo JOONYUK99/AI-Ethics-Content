@@ -6,8 +6,8 @@ import re
 
 def get_model():
     """Gemini 모델을 가져오는 함수"""
-    # 최신 모델을 사용하면 더 안정적인 결과를 얻을 수 있습니다.
-    return genai.GenerativeModel('gemini-1.5-flash-latest')
+    # 안정적인 'gemini-pro' 모델을 사용하도록 수정했습니다.
+    return genai.GenerativeModel('gemini-pro')
 
 def transform_scenario(teacher_input):
     """교사의 입력을 받아 대화형 시나리오를 생성하는 함수"""
@@ -262,3 +262,4 @@ elif st.session_state.stage == 'conclusion':
     if st.button("새로운 주제로 다시 시작하기"):
         restart_lesson()
         st.rerun()
+
