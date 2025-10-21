@@ -11,7 +11,7 @@ AI_ETHICS_KB = {
         "title": "🎨 AI 예술과 저작권",
         "content": """AI가 생성한 그림, 음악 등 예술 작품의 저작권은 누구에게 있을까요? 이는 현재 법적으로 명확히 정해지지 않은 복잡한 문제입니다. 일반적으로 저작권은 '인간의 사상 또는 감정을 표현한 창작물'에 부여됩니다. 따라서 AI가 스스로 창작한 것은 저작권 등록 대상이 아니라는 시각이 많습니다. 하지만 AI를 도구로 사용한 사람의 창의적인 기여가 있었다면 그 사람에게 저작권이 인정될 수도 있습니다. 예를 들어, 사용자가 AI에게 매우 구체적이고 독창적인 지시를 내려 그림을 만들었다면, 그 지시 자체가 창작 활동으로 볼 수 있다는 의견입니다.""",
         "example_prompt": "최근 열린 미술 대회에서 AI로 그린 그림이 1등을 차지해 큰 논란이 되었습니다. 그림을 그린 학생은 AI에게 수백 번의 지시어를 입력하며 원하는 그림을 얻었다고 주장합니다. 이 그림의 저작권은 누구에게 있어야 할까요?"
-    },
+    }
     "autonomous_vehicle_dilemma": {
         "title": "🚗 자율주행차의 트롤리 딜레마",
         "content": """자율주행차가 운행 중 갑작스러운 사고 상황에 직면했을 때, 어떤 선택을 하도록 프로그래밍해야 할까요? 예를 들어, 그대로 직진하면 보행자 5명과 충돌하고, 핸들을 꺾으면 탑승자 1명이 다치는 상황이라면 어떤 판단이 더 윤리적일까요? 이는 '트롤리 딜레마'라고 불리는 유명한 윤리적 문제와 같습니다. 탑승자의 안전을 최우선으로 해야 할지, 더 많은 사람의 생명을 구해야 할지 결정하는 것은 매우 어렵습니다. 자동차 제조사, 프로그래머, 그리고 사회 전체가 함께 고민하고 합의해야 할 중요한 문제입니다.""",
@@ -55,7 +55,7 @@ def load_knowledge_base(file_path):
     except FileNotFoundError:
         return None
 
-# --- 3. RAG 비교 데모 페이지 함수 (형님 아이디어 적용 버전) ---
+# --- 3. RAG 비교 데모 페이지 함수 ---
 def run_comparison_demo():
     """RAG 효과 비교 데모 페이지를 실행하는 함수"""
     st.header("✨ RAG의 힘, 직접 확인하기")
@@ -130,7 +130,10 @@ def run_main_app():
         st.session_state.current_part = -1
         st.session_state.debate_turns = 0
         st.session_state.teacher_input = ""
-        st.session_state.app_mode = 'main' # 현재 모드 저장
+        st.session_state.debate_finished = False
+        st.session_state.app_mode = 'main'
+
+    MAX_DEBATE_REPLIES = 3 # 학생의 최대 답변 횟수
 
     def restart_lesson():
         st.session_state.stage = 'start'
@@ -139,8 +142,70 @@ def run_main_app():
         st.session_state.current_part = -1
         st.session_state.debate_turns = 0
         st.session_state.teacher_input = ""
+        st.session_state.debate_finished = False
     
-    # 함수 내에서만 필요한 함수들 정의
+    # --- 동적 토론을 위한 AI 함수들 ---
+    def analyze_student_response(debate_history):
+        """'감독 AI': 학생의 답변을 분석하여 토론 난이도를 판단하는 함수"""
+        model = get_model()
+        prompt = (
+            "당신은 학생의 토론 능력을 분석하는 교육 심리 전문가입니다.\n"
+            "아래 '토론 내용'에서 가장 마지막에 학생이 한 답변을 보고, 학생의 이해도와 논리력을 판단해주세요.\n"
+            "반드시 다음 네 가지 중 하나로만 평가하고, 그 이유를 간략하게 설명해주세요.\n\n"
+            "# 평가 옵션:\n"
+            "- 깊게 파고들기: 학생이 주제를 매우 잘 이해하고 있으며, 더 깊은 질문을 통해 생각을 확장시킬 수 있습니다.\n"
+            "- 토론 이어가기: 학생이 자신의 생각을 잘 표현하고 있으며, 현재 흐름대로 토론을 이어가도 좋습니다.\n"
+            "- 쉽게 질문하기: 학생이 자신의 생각을 표현하는 데 약간 어려움을 겪고 있는 것 같습니다. 더 구체적이거나 쉬운 질문으로 생각을 이끌어줄 필요가 있습니다.\n"
+            "- 토론 마무리하기: 학생이 토론에 큰 부담을 느끼거나, 주제에서 벗어난 답변을 하고 있습니다. 격려하며 토론을 마무리하고 다음 단계로 넘어가는 것이 좋습니다.\n\n"
+            f"--- 토론 내용 ---\n{debate_history}\n\n"
+            "# 평가 결과 (옵션 중 하나만 선택):"
+        )
+        try:
+            response = model.generate_content(prompt)
+            text = response.text.strip()
+            if "깊게 파고들기" in text: return "deepen"
+            elif "쉽게 질문하기" in text: return "simplify"
+            elif "토론 마무리하기" in text: return "end_early"
+            else: return "continue"
+        except Exception:
+            return "continue"
+
+    def generate_simpler_question(debate_history):
+        """학생을 위해 더 쉽고 구체적인 질문을 생성하는 함수"""
+        model = get_model()
+        prompt = (
+            "당신은 매우 다정하고 친절한 AI 윤리 선생님입니다.\n"
+            "아래 '토론 내용'을 보면 학생이 자신의 생각을 표현하는 데 약간 어려움을 겪고 있습니다.\n"
+            "학생의 마지막 답변을 격려하면서, '예' 또는 '아니오'로 답하거나 둘 중 하나를 선택할 수 있는 더 쉽고 구체적인 질문을 해주세요.\n\n"
+            f"--- 토론 내용 ---\n{debate_history}\n\n"
+            "AI 선생님의 쉽고 친절한 다음 질문:"
+        )
+        try:
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            return f"쉬운 질문 생성 중 오류: {e}"
+
+    def continue_debate(debate_history, level="normal"):
+        """진행된 토론 내용에 이어 다음 질문을 생성하는 함수 (난이도 조절)"""
+        model = get_model()
+        if level == "deepen":
+            instruction = "학생의 의견에 깊이 공감하며, '만약 ~라면 어떨까?' 또는 '다른 관점에서 보면 어떨까?' 와 같이 반론을 제기하거나 생각의 폭을 더 깊게 넓힐 수 있는 심화 질문을 해주세요."
+        else:
+            instruction = "학생의 의견에 깊이 공감하며, 생각의 폭을 넓힐 수 있는 다음 질문을 해주세요."
+        prompt = (
+            f"당신은 다정한 AI 윤리 선생님입니다. {instruction}\n"
+            "학생의 의견을 존중하는 태도를 보여주세요.\n\n"
+            f"--- 지금까지의 토론 내용 ---\n{debate_history}\n\n"
+            "AI 선생님의 다음 질문:"
+        )
+        try:
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            return f"토론 중 오류가 발생했습니다: {e}"
+
+    # --- 기존 AI 함수들 ---
     def retrieve_context(user_input, kb):
         if any(keyword in user_input for keyword in ["그림", "미술", "저작권", "대회"]): return kb["ai_art_copyright"]["content"]
         if any(keyword in user_input for keyword in ["자율주행", "자동차", "사고"]): return kb["autonomous_vehicle_dilemma"]["content"]
@@ -155,7 +220,6 @@ def run_main_app():
         prompt = (
             "당신은 초등학생 고학년 눈높이에 맞춰 AI 윤리 교육용 인터랙티브 시나리오를 작성하는 전문 작가입니다.\n"
             "아래 '입력 내용'과 '참고 자료'를 바탕으로, 학생들이 몰입할 수 있는 완결된 이야기를 만들어 주세요.\n"
-
             "이야기는 총 4개의 파트로 구성되며, 각 파트 끝에는 주인공의 고민이 드러나는 두 가지 선택지를 제시해야 합니다.\n\n"
             "# 필수 출력 형식:\n"
             "[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n"
@@ -186,7 +250,6 @@ def run_main_app():
                 continue
         return len(st.session_state.full_scenario) >= 4
 
-    # (Debate와 Conclusion 함수는 여기에 위치)
     def start_debate(history, choice):
         model = get_model()
         prompt = (
@@ -195,15 +258,6 @@ def run_main_app():
         try:
             response = model.generate_content(prompt); return response.text.strip()
         except Exception as e: return f"토론 시작 중 오류: {e}"
-
-    def continue_debate(debate_history):
-        model = get_model()
-        prompt = (
-            "당신은 다정한 AI 윤리 선생님입니다. 학생의 의견에 공감하며 토론을 이어가주세요.\n"
-            f"--- 지금까지의 토론 내용 ---\n{debate_history}\n\nAI 선생님의 다음 질문:")
-        try:
-            response = model.generate_content(prompt); return response.text.strip()
-        except Exception as e: return f"토론 중 오류: {e}"
 
     def generate_conclusion(final_history):
         model = get_model()
@@ -215,7 +269,7 @@ def run_main_app():
             response = model.generate_content(prompt); return response.text.strip()
         except Exception as e: return f"결론 생성 중 오류: {e}"
 
-    # UI 로직 시작
+    # --- UI 로직 시작 ---
     if st.session_state.stage == 'start':
         st.info("AI 윤리 교육 콘텐츠로 만들고 싶은 사례를 입력하거나, 아래 예시 주제를 선택하여 시작해보세요.")
         use_rag = st.toggle("✅ RAG 기능 사용하기 (지식 베이스 참고)", value=True, help="RAG 기능을 켜면, AI가 전문 자료를 참고하여 더 깊이 있는 시나리오를 만듭니다.")
@@ -255,54 +309,80 @@ def run_main_app():
                         st.error("AI가 이야기를 만들다 힘들어하네요. 내용을 조금 더 구체적으로 작성 후 다시 시도해주세요.")
 
     elif st.session_state.stage == 'story':
-        if not st.session_state.full_scenario or st.session_state.current_part < 0:
-            st.warning("이야기를 불러오는 데 문제가 발생했어요. 처음부터 다시 시작해주세요.")
-            if st.button("처음으로 돌아가기"): restart_lesson(); st.rerun()
-        else:
-            part = st.session_state.full_scenario[st.session_state.current_part]
-            current_story = f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{part['story']}"
-            if current_story not in st.session_state.full_log: st.session_state.full_log += current_story
-            st.markdown(st.session_state.full_log, unsafe_allow_html=True)
-            st.info("자, 이제 어떤 선택을 해볼까요?")
-            col1, col2 = st.columns(2)
-            if col1.button(f"**선택 A:** {part['choice_a']}", use_container_width=True, key=f"A_{st.session_state.current_part}"):
-                st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (A):** {part['choice_a']}"; st.session_state.stage = 'debate'; st.rerun()
-            if col2.button(f"**선택 B:** {part['choice_b']}", use_container_width=True, key=f"B_{st.session_state.current_part}"):
-                st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (B):** {part['choice_b']}"; st.session_state.stage = 'debate'; st.rerun()
+        part = st.session_state.full_scenario[st.session_state.current_part]
+        current_story = f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{part['story']}"
+        if current_story not in st.session_state.full_log: st.session_state.full_log += current_story
+        st.markdown(st.session_state.full_log, unsafe_allow_html=True)
+        st.info("자, 이제 어떤 선택을 해볼까요?")
+        col1, col2 = st.columns(2)
+        if col1.button(f"**선택 A:** {part['choice_a']}", use_container_width=True, key=f"A_{st.session_state.current_part}"):
+            st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (A):** {part['choice_a']}"; st.session_state.stage = 'debate'; st.rerun()
+        if col2.button(f"**선택 B:** {part['choice_b']}", use_container_width=True, key=f"B_{st.session_state.current_part}"):
+            st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (B):** {part['choice_b']}"; st.session_state.stage = 'debate'; st.rerun()
 
     elif st.session_state.stage == 'debate':
+        # 채팅 기록 표시
         log_parts = re.split(r'\n\n(?=---\n\n|>> 나의 선택|AI 선생님:|나 \(의견)', st.session_state.full_log)
         for p in log_parts:
-            p = p.strip()
+            p = p.strip();
             if p.startswith(">> 나의 선택"): st.chat_message("user", avatar="🙋‍♂️").write(p)
             elif p.startswith("AI 선생님:"): st.chat_message("assistant", avatar="🤖").write(p.replace("AI 선생님:", "**AI 선생님:**"))
             elif p.startswith("나 (의견"): st.chat_message("user", avatar="🙋‍♂️").write(p)
             else: st.markdown(p, unsafe_allow_html=True)
 
-        if st.session_state.debate_turns == 0:
-            with st.chat_message("assistant", avatar="🤖"):
-                with st.spinner("AI 선생님이 질문을 준비하고 있어요..."):
-                    choice = st.session_state.full_log.split('>> 나의 선택')[-1]
-                    question = start_debate(st.session_state.full_log, choice)
-                    st.session_state.full_log += f"\n\nAI 선생님: {question}"; st.session_state.debate_turns = 1; st.rerun()
-        elif st.session_state.debate_turns == 1:
-            if reply := st.chat_input("선생님의 질문에 답변해주세요:"):
-                st.session_state.full_log += f"\n\n나 (의견 1): {reply}"; st.session_state.debate_turns = 2; st.rerun()
-        elif st.session_state.debate_turns == 2:
-            with st.chat_message("assistant", avatar="🤖"):
-                with st.spinner("AI 선생님이 다음 질문을 생각 중이에요..."):
-                    question = continue_debate(st.session_state.full_log)
-                    st.session_state.full_log += f"\n\nAI 선생님: {question}"; st.session_state.debate_turns = 3; st.rerun()
-        elif st.session_state.debate_turns == 3:
-            if reply := st.chat_input("선생님의 질문에 답변해주세요:"):
-                st.session_state.full_log += f"\n\n나 (의견 2): {reply}"; st.session_state.debate_turns = 4; st.rerun()
-        elif st.session_state.debate_turns == 4:
+        # 토론 종료 조건
+        if st.session_state.get('debate_finished', False):
             st.info("토론이 완료되었어요. 아래 버튼을 눌러 다음으로 넘어가요!")
             is_last_part = st.session_state.current_part >= len(st.session_state.full_scenario) - 1
             if st.button("다음 이야기로" if not is_last_part else "최종 정리 보기"):
-                st.session_state.debate_turns = 0; st.session_state.current_part += 1
+                st.session_state.debate_turns = 0; st.session_state.debate_finished = False
+                st.session_state.current_part += 1
                 st.session_state.stage = 'conclusion' if is_last_part else 'story'
                 st.rerun()
+        
+        # 토론 진행 로직
+        else:
+            # AI의 첫 질문
+            if st.session_state.debate_turns == 0:
+                with st.chat_message("assistant", avatar="🤖"):
+                    with st.spinner("AI 선생님이 질문을 준비하고 있어요..."):
+                        choice = st.session_state.full_log.split('>> 나의 선택')[-1]
+                        question = start_debate(st.session_state.full_log, choice)
+                        st.session_state.full_log += f"\n\nAI 선생님: {question}"; st.session_state.debate_turns = 1; st.rerun()
+            
+            # 학생의 답변 턴
+            elif st.session_state.debate_turns % 2 != 0:
+                if reply := st.chat_input(f"의견을 이야기해주세요 ({ (st.session_state.debate_turns + 1) // 2 }/{MAX_DEBATE_REPLIES}):"):
+                    st.session_state.full_log += f"\n\n나 (의견 { (st.session_state.debate_turns + 1) // 2 }): {reply}"
+                    st.session_state.debate_turns += 1
+                    st.rerun()
+            
+            # AI의 다음 질문 턴 (감독 AI 작동)
+            else:
+                with st.chat_message("assistant", avatar="🤖"):
+                    with st.spinner("AI 선생님이 다음 질문을 고민하고 있어요..."):
+                        decision = analyze_student_response(st.session_state.full_log)
+                        
+                        student_reply_count = st.session_state.debate_turns / 2
+                        if decision == "end_early" or student_reply_count >= MAX_DEBATE_REPLIES:
+                            final_message = "좋은 의견이에요! 이렇게 자신의 생각을 이야기하는 것만으로도 정말 대단한 일이에요. 우리 이제 다음 이야기로 넘어가 볼까요?"
+                            st.session_state.full_log += f"\n\nAI 선생님: {final_message}"
+                            st.session_state.debate_finished = True
+                            st.rerun()
+                        else:
+                            question = ""
+                            if decision == "simplify":
+                                st.info("💡 AI 선생님이 학생의 답변을 바탕으로 더 쉬운 질문을 준비했어요.")
+                                question = generate_simpler_question(st.session_state.full_log)
+                            elif decision == "deepen":
+                                st.info("💡 AI 선생님이 학생의 답변을 바탕으로 더 깊은 질문을 준비했어요.")
+                                question = continue_debate(st.session_state.full_log, level="deepen")
+                            else: # continue
+                                question = continue_debate(st.session_state.full_log, level="normal")
+                            
+                            st.session_state.full_log += f"\n\nAI 선생님: {question}"
+                            st.session_state.debate_turns += 1
+                            st.rerun()
 
     elif st.session_state.stage == 'conclusion':
         st.markdown("### ✨ 우리의 전체 이야기와 토론 여정 ✨")
@@ -329,7 +409,7 @@ if app_mode == "교육 콘텐츠 생성":
 elif app_mode == "RAG 효과 비교 데모":
     if 'app_mode' not in st.session_state or st.session_state.app_mode != 'demo':
         # 데모 모드로 전환 시, 메인 앱의 상태 초기화
-        keys_to_clear = ['stage', 'full_scenario', 'full_log', 'current_part', 'debate_turns', 'teacher_input']
+        keys_to_clear = ['stage', 'full_scenario', 'full_log', 'current_part', 'debate_turns', 'teacher_input', 'debate_finished']
         for key in keys_to_clear:
             if key in st.session_state:
                 del st.session_state[key]
