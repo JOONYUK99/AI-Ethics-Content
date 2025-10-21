@@ -6,8 +6,8 @@ import re
 
 def get_model():
     """Gemini 모델을 가져오는 함수"""
-    # 안정적인 'gemini-pro' 모델을 사용하도록 수정했습니다.
-    return genai.GenerativeModel('gemini-pro')
+    # 사용자의 원래 모델이었던 'gemini-pro-latest'로 다시 수정했습니다.
+    return genai.GenerativeModel('gemini-pro-latest')
 
 def transform_scenario(teacher_input):
     """교사의 입력을 받아 대화형 시나리오를 생성하는 함수"""
@@ -124,13 +124,21 @@ except Exception:
     st.info("좌측 하단의 'Secrets' 버튼을 눌러 `GOOGLE_API_KEY = '실제API키'` 형식으로 API 키를 등록할 수 있습니다.")
     st.stop()
 
-# 세션 상태 초기화
+# --- 세션 상태 초기화 (핵심 수정 부분) ---
+# 각 상태 변수가 존재하는지 개별적으로 확인하여 안정성을 높입니다.
 if 'stage' not in st.session_state:
     st.session_state.stage = 'start'
+if 'full_scenario' not in st.session_state:
     st.session_state.full_scenario = []
+if 'full_log' not in st.session_state:
     st.session_state.full_log = ""
+if 'current_part' not in st.session_state:
     st.session_state.current_part = -1
+if 'debate_turns' not in st.session_state:
     st.session_state.debate_turns = 0
+if 'teacher_input' not in st.session_state:
+    st.session_state.teacher_input = ""
+
 
 def restart_lesson():
     """수업을 처음부터 다시 시작하는 함수"""
@@ -172,28 +180,35 @@ if st.session_state.stage == 'start':
 
 # [이야기 단계] 생성된 시나리오와 선택지 제시
 elif st.session_state.stage == 'story':
-    part = st.session_state.full_scenario[st.session_state.current_part]
-    current_story = f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{part['story']}"
-    
-    # 중복 추가를 방지합니다.
-    if current_story not in st.session_state.full_log:
-        st.session_state.full_log += current_story
+    # 시나리오가 비어있는 예외 상황 처리
+    if not st.session_state.full_scenario or st.session_state.current_part < 0:
+        st.warning("이야기를 불러오는 데 문제가 발생했어요. 처음부터 다시 시작해주세요.")
+        if st.button("처음으로 돌아가기"):
+            restart_lesson()
+            st.rerun()
+    else:
+        part = st.session_state.full_scenario[st.session_state.current_part]
+        current_story = f"\n\n---\n\n### 이야기 #{st.session_state.current_part + 1}\n{part['story']}"
         
-    st.markdown(st.session_state.full_log, unsafe_allow_html=True)
-    st.info("자, 이제 어떤 선택을 해볼까요?")
+        # 중복 추가를 방지합니다.
+        if current_story not in st.session_state.full_log:
+            st.session_state.full_log += current_story
+            
+        st.markdown(st.session_state.full_log, unsafe_allow_html=True)
+        st.info("자, 이제 어떤 선택을 해볼까요?")
+        
+        col1, col2 = st.columns(2)
+        choice_key_prefix = f"part_{st.session_state.current_part}"
     
-    col1, col2 = st.columns(2)
-    choice_key_prefix = f"part_{st.session_state.current_part}"
-
-    if col1.button(f"**선택 A:** {part['choice_a']}", use_container_width=True, key=f"{choice_key_prefix}_A"):
-        st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (A):** {part['choice_a']}"
-        st.session_state.stage = 'debate'
-        st.rerun()
-
-    if col2.button(f"**선택 B:** {part['choice_b']}", use_container_width=True, key=f"{choice_key_prefix}_B"):
-        st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (B):** {part['choice_b']}"
-        st.session_state.stage = 'debate'
-        st.rerun()
+        if col1.button(f"**선택 A:** {part['choice_a']}", use_container_width=True, key=f"{choice_key_prefix}_A"):
+            st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (A):** {part['choice_a']}"
+            st.session_state.stage = 'debate'
+            st.rerun()
+    
+        if col2.button(f"**선택 B:** {part['choice_b']}", use_container_width=True, key=f"{choice_key_prefix}_B"):
+            st.session_state.full_log += f"\n\n**>> 나의 선택 #{st.session_state.current_part + 1} (B):** {part['choice_b']}"
+            st.session_state.stage = 'debate'
+            st.rerun()
 
 # [토론 단계] AI 선생님과 대화
 elif st.session_state.stage == 'debate':
