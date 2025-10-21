@@ -190,8 +190,8 @@ if st.session_state.stage == 'start':
     st.write("---")
     st.write("**👇 또는 아래 예시 주제를 선택하여 시작해보세요!**")
     
-    # Selectbox의 옵션 생성 (딕셔너리의 title을 사용)
-    example_options = {kb[key]["title"]: key for key in kb}
+    # Selectbox의 옵션 생성 (딕셔너리의 title을 사용) - 오류 수정
+    example_options = {AI_ETHICS_KB[key]["title"]: key for key in AI_ETHICS_KB}
     
     # '선택 안함' 옵션을 맨 앞에 추가
     options_list = ["주제 선택..."] + list(example_options.keys())
