@@ -25,7 +25,7 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. [수정됨] 기본 교육 자료 (코드 내장) ---
+# --- 4. 기본 교육 자료 (코드 내장) ---
 DEFAULT_RAG_DATA = """
 [국가 교육과정 및 인공지능 윤리기준 기반 가이드라인]
 
@@ -149,6 +149,7 @@ if 'scenario_images' not in st.session_state: st.session_state.scenario_images =
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
+# 기본값으로 DEFAULT_RAG_DATA 사용
 if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
@@ -167,10 +168,9 @@ if mode == "교사용 (수업 개설)":
     password = st.text_input("교사 인증 비밀번호 (1234)", type="password")
     
     if password == "1234":
-        # RAG 데이터 확인
+        # RAG 데이터 확인 (내용 미리보기 제거됨)
         with st.expander("📚 적용된 교육과정 및 윤리기준 확인"):
-            st.info("기본 탑재된 국가 인공지능 윤리기준 및 교육과정 내용입니다.")
-            st.text_area("내용 미리보기", st.session_state.rag_text, height=200, disabled=True)
+            st.success("✅ 국가 인공지능 윤리기준 및 교육과정이 기본 탑재되어 있습니다.")
             
             uploaded_file = st.file_uploader("추가 교육 자료 업로드 (txt)", type="txt")
             if uploaded_file:
@@ -220,14 +220,12 @@ if mode == "교사용 (수업 개설)":
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
-    # [A] 튜토리얼 (단계별 진행 적용)
+    # [A] 튜토리얼 (단계별 진행)
     if not st.session_state.tutorial_complete:
         st.header("🎒 연습 시간: 테스트 봇과 친해지기")
         st.progress((st.session_state.tutorial_step + 1) / 3, text=f"진행률: {st.session_state.tutorial_step + 1}/3 단계")
 
-        # ----------------------------------------------------
-        # 1단계: 버튼 누르기 (여기서 버튼을 눌러야 2단계로 넘어감)
-        # ----------------------------------------------------
+        # 1단계
         if st.session_state.tutorial_step == 0:
             st.markdown("### [1단계] 버튼 누르기 연습")
             with st.chat_message("assistant", avatar="🤖"):
@@ -238,31 +236,22 @@ elif mode == "학생용 (수업 참여)":
             col1, col2 = st.columns(2)
             if col1.button("🅰️ 더운 여름이 좋아! 🍦", use_container_width=True):
                 st.toast("잘했어! 여름을 좋아하는구나.")
-                st.session_state.tutorial_step = 1 # 다음 단계로 이동
-                st.rerun()
+                st.session_state.tutorial_step = 1; st.rerun()
             if col2.button("🅱️ 추운 겨울이 좋아! ☃️", use_container_width=True):
                 st.toast("완벽해! 겨울을 좋아하는구나.")
-                st.session_state.tutorial_step = 1 # 다음 단계로 이동
-                st.rerun()
+                st.session_state.tutorial_step = 1; st.rerun()
 
-        # ----------------------------------------------------
-        # 2단계: 채팅 입력하기 (입력을 해야 3단계로 넘어감)
-        # ----------------------------------------------------
+        # 2단계
         elif st.session_state.tutorial_step == 1:
             st.markdown("### [2단계] 글자 쓰기 연습")
             with st.chat_message("assistant", avatar="🤖"):
                 st.write("버튼 누르기 성공! 참 잘했어. 👍")
                 st.write("이번에는 아래 채팅창에 **'안녕'**이나 **'반가워'**라고 인사를 써볼래?")
 
-            # 채팅창 (입력 감지 시 다음 단계로)
             if user_input := st.chat_input("여기에 인사를 적고 엔터(Enter)를 쳐봐!"):
-                st.balloons()
-                st.session_state.tutorial_step = 2 # 다음 단계로 이동
-                st.rerun()
+                st.balloons(); st.session_state.tutorial_step = 2; st.rerun()
 
-        # ----------------------------------------------------
-        # 3단계: 완료 및 시작
-        # ----------------------------------------------------
+        # 3단계
         elif st.session_state.tutorial_step == 2:
             st.markdown("### [완료] 준비 끝!")
             with st.chat_message("assistant", avatar="🤖"):
@@ -270,8 +259,7 @@ elif mode == "학생용 (수업 참여)":
                 st.write("아래 버튼을 누르면 진짜 수업이 시작될 거야.")
 
             if st.button("🚀 수업 시작하기", type="primary", use_container_width=True):
-                st.session_state.tutorial_complete = True # 튜토리얼 종료
-                st.rerun()
+                st.session_state.tutorial_complete = True; st.rerun()
 
     # [B] 본 수업
     else:
