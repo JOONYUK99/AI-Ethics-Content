@@ -2,7 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import re
 
-# --- 1. 페이지 설정 및 제목 ---
+# --- 1. 페이지 설정 (제목 적용) ---
 st.set_page_config(page_title="쭈니봇과 함께 토론하기", page_icon="🤖")
 
 # --- 2. 예시 주제 데이터 ---
@@ -15,7 +15,7 @@ EXAMPLE_TOPICS = {
 }
 
 # --- 3. 기본 설정 및 함수 ---
-# API 키 설정
+# API 키 설정 (Streamlit secrets 사용)
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 except Exception:
@@ -24,15 +24,16 @@ except Exception:
 
 def get_model():
     """
-    Gemini 최신 모델(Flash)을 가져오는 함수
-    * 속도가 빠르고 무료 티어에서 안정적입니다.
+    모델 설정 함수
+    * 404 오류가 계속 나면 'gemini-1.5-flash' 대신 'gemini-pro'로 바꿔보세요.
+    * 하지만 근본적인 해결책은 'pip install --upgrade google-generativeai' 입니다.
     """
     return genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 4. AI 로직 함수들 ---
 
 def transform_scenario(teacher_input):
-    """선생님의 입력을 바탕으로 4단계 시나리오 생성"""
+    """선생님의 입력을 바탕으로 시나리오 생성"""
     model = get_model()
     prompt = (
         "당신은 초등학생 고학년 눈높이에 맞춰 AI 윤리 교육용 인터랙티브 시나리오를 작성하는 전문 작가 '쭈니봇'입니다.\n"
@@ -51,7 +52,7 @@ def transform_scenario(teacher_input):
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        st.error(f"시나리오 생성 중 오류: {e}")
+        st.error(f"시나리오 생성 중 오류가 발생했어요: {e}")
         return None
 
 def analyze_student_response(debate_history):
