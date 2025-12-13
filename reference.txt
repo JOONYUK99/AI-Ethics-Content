@@ -165,55 +165,55 @@ mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여
 # ==========================================
 if mode == "교사용 (수업 개설)":
     st.header("👨‍🏫 교사용: 교육과정 기반 수업 만들기")
-    password = st.text_input("교사 인증 비밀번호 (1234)", type="password")
-    
-    if password == "1234":
-        # [수정됨] 내용 미리보기(text_area) 완전 삭제
-        with st.expander("📚 교육 자료 관리"):
-            uploaded_file = st.file_uploader("추가 교육 자료 업로드 (txt)", type="txt")
-            if uploaded_file:
-                string_data = uploaded_file.getvalue().decode("utf-8")
-                st.session_state.rag_text += "\n\n[추가 자료]\n" + string_data
-                st.success("✅ 추가 자료가 교육과정에 통합되었습니다!")
-            else:
-                st.info("기본 교육과정 데이터가 탑재되어 있습니다.")
 
-        input_topic = st.text_area("오늘의 수업 주제 (예: 딥페이크, AI 저작권, 챗봇 예절)", value=st.session_state.topic)
-        st.caption("💡 팁: '딥페이크'라고만 적어도 교육과정에 맞춰 '친구 얼굴 합성 사례' 등을 만들어줍니다.")
-        
-        if st.button("🚀 교육 시나리오 생성"):
-            if not input_topic.strip():
-                st.warning("⚠️ 주제를 입력해야 시나리오를 만들 수 있어요!")
-            else:
-                with st.spinner("교육과정 성취 기준에 맞춰 시나리오를 설계 중입니다..."):
-                    raw = create_scenario(input_topic, st.session_state.rag_text)
-                    parsed = parse_scenario(raw)
-                    if parsed:
-                        st.session_state.scenario = parsed
-                        st.session_state.topic = input_topic
-                        st.session_state.current_step = 0
-                        st.session_state.chat_log = []
-                        st.session_state.scenario_images = [None]*4
-                        st.session_state.selected_choice = None
-                        st.session_state.waiting_for_reason = False
-                        st.session_state.feedback_shown = False
-                        st.success("교육과정 연계 시나리오 생성 완료!")
-        
-        if st.session_state.scenario:
-            st.write("---")
-            st.subheader("🖼️ 교육용 삽화 생성")
-            cols = st.columns(4)
-            for i in range(4):
-                with cols[i]:
-                    st.markdown(f"**단계 {i+1}**")
-                    if st.session_state.scenario_images[i]:
-                        st.image(st.session_state.scenario_images[i])
-                    if st.button(f"그림 생성 {i+1}", key=f"gen_{i}"):
-                        with st.spinner("그리는 중..."):
-                            url = generate_image(st.session_state.scenario[i]['story'])
-                            if url:
-                                st.session_state.scenario_images[i] = url
-                                st.rerun()
+    # [수정완료] 비밀번호 체크 삭제됨. 바로 내용 표시.
+    
+    # [수정완료] 내용 미리보기 창 삭제됨.
+    # 추가 자료 업로드 기능만 작게 남겨둠 (필요 없으면 무시 가능)
+    with st.expander("➕ 추가 교육 자료 업로드 (선택사항)"):
+        uploaded_file = st.file_uploader("txt 파일 업로드", type="txt")
+        if uploaded_file:
+            string_data = uploaded_file.getvalue().decode("utf-8")
+            st.session_state.rag_text += "\n\n[추가 자료]\n" + string_data
+            st.success("✅ 추가 자료가 통합되었습니다!")
+
+    # 주제 입력 (필수)
+    input_topic = st.text_area("오늘의 수업 주제 (예: 딥페이크, AI 저작권, 챗봇 예절)", value=st.session_state.topic, height=100)
+    st.caption("💡 팁: '딥페이크'라고만 적어도 교육과정에 맞춰 '친구 얼굴 합성 사례' 등을 만들어줍니다.")
+    
+    if st.button("🚀 교육 시나리오 생성"):
+        if not input_topic.strip():
+            st.warning("⚠️ 주제를 입력해야 시나리오를 만들 수 있어요!")
+        else:
+            with st.spinner("교육과정 성취 기준에 맞춰 시나리오를 설계 중입니다..."):
+                raw = create_scenario(input_topic, st.session_state.rag_text)
+                parsed = parse_scenario(raw)
+                if parsed:
+                    st.session_state.scenario = parsed
+                    st.session_state.topic = input_topic
+                    st.session_state.current_step = 0
+                    st.session_state.chat_log = []
+                    st.session_state.scenario_images = [None]*4
+                    st.session_state.selected_choice = None
+                    st.session_state.waiting_for_reason = False
+                    st.session_state.feedback_shown = False
+                    st.success("교육과정 연계 시나리오 생성 완료!")
+    
+    if st.session_state.scenario:
+        st.write("---")
+        st.subheader("🖼️ 교육용 삽화 생성")
+        cols = st.columns(4)
+        for i in range(4):
+            with cols[i]:
+                st.markdown(f"**단계 {i+1}**")
+                if st.session_state.scenario_images[i]:
+                    st.image(st.session_state.scenario_images[i])
+                if st.button(f"그림 생성 {i+1}", key=f"gen_{i}"):
+                    with st.spinner("그리는 중..."):
+                        url = generate_image(st.session_state.scenario[i]['story'])
+                        if url:
+                            st.session_state.scenario_images[i] = url
+                            st.rerun()
 
 # ==========================================
 # 🙋‍♂️ 학생용 화면
