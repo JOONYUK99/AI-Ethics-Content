@@ -8,6 +8,7 @@ st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", 
 
 # --- 2. OpenAI 클라이언트 설정 ---
 try:
+    # secrets.toml에 OPENAI_API_KEY가 있어야 합니다.
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 except Exception:
     st.error("⚠️ OpenAI API 키를 설정해주세요! (.streamlit/secrets.toml 파일 확인)")
@@ -32,7 +33,6 @@ DEFAULT_RAG_DATA = """
 제1장. 인간 존중과 정보 예절 (도덕과 교육과정 + 국가 AI 윤리기준)
 1. 인간의 존엄성 원칙
    - AI는 인간을 돕는 도구일 뿐, 사람을 지배하거나 해치면 안 됩니다.
-   - 가상 공간에서도 현실과 똑같이 친구를 존중하고 예의를 지켜야 합니다.
 2. 사이버 폭력 예방
    - AI를 이용해 친구를 놀리거나, 딥페이크(합성)로 가짜 사진을 만드는 건 심각한 폭력입니다.
    - 나쁜 말, 욕설, 비하 발언을 AI에게 가르치거나 사용하면 안 됩니다.
@@ -40,27 +40,22 @@ DEFAULT_RAG_DATA = """
 제2장. 프라이버시와 개인정보 보호 (실과/정보과 교육과정 + 국가 AI 윤리기준)
 3. 개인정보 자기결정권
    - 나의 이름, 학교, 사진, 전화번호는 아주 소중한 정보입니다. AI에게 함부로 알려주면 안 됩니다.
-   - 다른 사람의 정보도 동의 없이 AI에 입력하거나 퍼뜨리면 안 됩니다.
 4. 기술 오남용 방지
    - AI 스피커나 카메라가 나를 감시할 수도 있다는 점을 기억하고, 안전하게 사용해야 합니다.
 
 제3장. 공정성과 다양성 존중 (국가 AI 윤리기준 '다양성 존중')
 5. 편향성(치우침) 경계하기
    - AI가 남자/여자, 인종, 장애인에 대해 차별적인 말을 하면 "틀렸어!"라고 생각해야 합니다.
-   - 나와 다른 생각을 가진 친구나 AI의 의견도 경청하되, 비판적으로 받아들여야 합니다.
 
 제4장. 책임과 저작권 (실과/정보과 + 도덕과 교육과정)
 6. 책임의 원칙
    - AI를 사용한 결과에 대한 책임은 결국 '사용자(나)'에게 있습니다.
-   - 숙제를 AI가 대신 해줬다고 해서 내 실력이 되는 건 아닙니다. 스스로 생각하는 힘을 길러야 합니다.
 7. 지식재산권과 저작권
    - AI가 만든 그림이나 글을 내가 만든 것처럼 속이면 안 됩니다. (출처 밝히기)
-   - 다른 작가님의 그림을 AI에게 무단으로 학습시키는 것도 고민해봐야 할 문제입니다.
 
 제5장. 데이터와 투명성 (국가 AI 윤리기준 '투명성')
 8. 사실 확인(팩트 체크)의 의무
    - AI는 가끔 거짓말(할루시네이션)을 합니다. AI의 말을 무조건 믿지 말고 선생님이나 책을 통해 확인해야 합니다.
-   - AI가 어떤 데이터를 공부해서 이런 답을 냈는지 궁금해하는 태도를 가져야 합니다.
 """
 
 # --- 5. 함수 정의 ---
@@ -82,7 +77,7 @@ def ask_gpt(prompt):
         return None
 
 def generate_image(prompt):
-    """DALL-E 3 이미지 생성 (교육용 삽화)"""
+    """DALL-E 3 이미지 생성 (교육용 삽화) - 여기가 핵심 기능!"""
     try:
         dalle_prompt = f"A friendly, educational cartoon-style illustration for elementary school textbook, depicting: {prompt}"
         response = client.images.generate(
@@ -149,7 +144,6 @@ if 'scenario_images' not in st.session_state: st.session_state.scenario_images =
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
-# 기본값으로 DEFAULT_RAG_DATA 사용
 if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
@@ -161,15 +155,13 @@ st.sidebar.title("🏫 AI 윤리 학습 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
 
 # ==========================================
-# 👨‍🏫 교사용 화면
+# 👨‍🏫 교사용 화면 (깔끔 버전)
 # ==========================================
 if mode == "교사용 (수업 개설)":
     st.header("👨‍🏫 교사용: 교육과정 기반 수업 만들기")
-
-    # [수정완료] 비밀번호 체크 삭제됨. 바로 내용 표시.
     
-    # [수정완료] 내용 미리보기 창 삭제됨.
-    # 추가 자료 업로드 기능만 작게 남겨둠 (필요 없으면 무시 가능)
+    # 비밀번호 없음, 긴 텍스트 박스 없음
+    
     with st.expander("➕ 추가 교육 자료 업로드 (선택사항)"):
         uploaded_file = st.file_uploader("txt 파일 업로드", type="txt")
         if uploaded_file:
@@ -177,9 +169,8 @@ if mode == "교사용 (수업 개설)":
             st.session_state.rag_text += "\n\n[추가 자료]\n" + string_data
             st.success("✅ 추가 자료가 통합되었습니다!")
 
-    # 주제 입력 (필수)
     input_topic = st.text_area("오늘의 수업 주제 (예: 딥페이크, AI 저작권, 챗봇 예절)", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: '딥페이크'라고만 적어도 교육과정에 맞춰 '친구 얼굴 합성 사례' 등을 만들어줍니다.")
+    st.caption("💡 팁: '딥페이크'라고만 적어도 교육과정에 맞춰 시나리오를 만들어줍니다.")
     
     if st.button("🚀 교육 시나리오 생성"):
         if not input_topic.strip():
@@ -216,7 +207,7 @@ if mode == "교사용 (수업 개설)":
                             st.rerun()
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면
+# 🙋‍♂️ 학생용 화면 (단계별 튜토리얼)
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
@@ -230,9 +221,7 @@ elif mode == "학생용 (수업 참여)":
             st.markdown("### [1단계] 버튼 누르기 연습")
             with st.chat_message("assistant", avatar="🤖"):
                 st.write("안녕? 나는 AI 윤리 선생님 '테스트 봇'이야! 👋")
-                st.write("우리 본격적으로 공부하기 전에, 나랑 대화하는 법을 연습해보자.")
-                st.write("**너는 어떤 계절을 더 좋아하니? 아래 버튼을 눌러줘!**")
-            
+                st.write("너는 어떤 계절을 더 좋아하니? 아래 버튼을 눌러줘!")
             col1, col2 = st.columns(2)
             if col1.button("🅰️ 더운 여름이 좋아! 🍦", use_container_width=True):
                 st.toast("잘했어! 여름을 좋아하는구나.")
@@ -247,7 +236,6 @@ elif mode == "학생용 (수업 참여)":
             with st.chat_message("assistant", avatar="🤖"):
                 st.write("버튼 누르기 성공! 참 잘했어. 👍")
                 st.write("이번에는 아래 채팅창에 **'안녕'**이나 **'반가워'**라고 인사를 써볼래?")
-
             if user_input := st.chat_input("여기에 인사를 적고 엔터(Enter)를 쳐봐!"):
                 st.balloons(); st.session_state.tutorial_step = 2; st.rerun()
 
@@ -257,7 +245,6 @@ elif mode == "학생용 (수업 참여)":
             with st.chat_message("assistant", avatar="🤖"):
                 st.write("완벽해! 이제 수업을 시작할 준비가 다 됐어. 🎉")
                 st.write("아래 버튼을 누르면 진짜 수업이 시작될 거야.")
-
             if st.button("🚀 수업 시작하기", type="primary", use_container_width=True):
                 st.session_state.tutorial_complete = True; st.rerun()
 
