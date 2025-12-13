@@ -4,7 +4,6 @@ import re
 import os
 
 # --- 1. 페이지 설정 ---
-# [변경] 교실/토론 -> 학습
 st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", page_icon="🤖", layout="wide")
 
 # --- 2. OpenAI 클라이언트 설정 ---
@@ -26,16 +25,45 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. 함수 정의 ---
+# --- 4. [수정됨] 기본 교육 자료 (코드 내장) ---
+DEFAULT_RAG_DATA = """
+[국가 교육과정 및 인공지능 윤리기준 기반 가이드라인]
 
-def load_reference_data():
-    """reference.txt (통합 교육과정 자료) 읽기"""
-    file_path = "reference.txt"
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            return f.read()
-    else:
-        return None
+제1장. 인간 존중과 정보 예절 (도덕과 교육과정 + 국가 AI 윤리기준)
+1. 인간의 존엄성 원칙
+   - AI는 인간을 돕는 도구일 뿐, 사람을 지배하거나 해치면 안 됩니다.
+   - 가상 공간에서도 현실과 똑같이 친구를 존중하고 예의를 지켜야 합니다.
+2. 사이버 폭력 예방
+   - AI를 이용해 친구를 놀리거나, 딥페이크(합성)로 가짜 사진을 만드는 건 심각한 폭력입니다.
+   - 나쁜 말, 욕설, 비하 발언을 AI에게 가르치거나 사용하면 안 됩니다.
+
+제2장. 프라이버시와 개인정보 보호 (실과/정보과 교육과정 + 국가 AI 윤리기준)
+3. 개인정보 자기결정권
+   - 나의 이름, 학교, 사진, 전화번호는 아주 소중한 정보입니다. AI에게 함부로 알려주면 안 됩니다.
+   - 다른 사람의 정보도 동의 없이 AI에 입력하거나 퍼뜨리면 안 됩니다.
+4. 기술 오남용 방지
+   - AI 스피커나 카메라가 나를 감시할 수도 있다는 점을 기억하고, 안전하게 사용해야 합니다.
+
+제3장. 공정성과 다양성 존중 (국가 AI 윤리기준 '다양성 존중')
+5. 편향성(치우침) 경계하기
+   - AI가 남자/여자, 인종, 장애인에 대해 차별적인 말을 하면 "틀렸어!"라고 생각해야 합니다.
+   - 나와 다른 생각을 가진 친구나 AI의 의견도 경청하되, 비판적으로 받아들여야 합니다.
+
+제4장. 책임과 저작권 (실과/정보과 + 도덕과 교육과정)
+6. 책임의 원칙
+   - AI를 사용한 결과에 대한 책임은 결국 '사용자(나)'에게 있습니다.
+   - 숙제를 AI가 대신 해줬다고 해서 내 실력이 되는 건 아닙니다. 스스로 생각하는 힘을 길러야 합니다.
+7. 지식재산권과 저작권
+   - AI가 만든 그림이나 글을 내가 만든 것처럼 속이면 안 됩니다. (출처 밝히기)
+   - 다른 작가님의 그림을 AI에게 무단으로 학습시키는 것도 고민해봐야 할 문제입니다.
+
+제5장. 데이터와 투명성 (국가 AI 윤리기준 '투명성')
+8. 사실 확인(팩트 체크)의 의무
+   - AI는 가끔 거짓말(할루시네이션)을 합니다. AI의 말을 무조건 믿지 말고 선생님이나 책을 통해 확인해야 합니다.
+   - AI가 어떤 데이터를 공부해서 이런 답을 냈는지 궁금해하는 태도를 가져야 합니다.
+"""
+
+# --- 5. 함수 정의 ---
 
 def ask_gpt(prompt):
     """GPT-4o 통신 함수"""
@@ -66,7 +94,7 @@ def generate_image(prompt):
 
 def create_scenario(topic, rag_data):
     """짧고 간결한 문장으로 시나리오 생성"""
-    if not rag_data: rag_data = "기본 윤리: 남에게 피해 주지 않기"
+    if not rag_data: rag_data = DEFAULT_RAG_DATA
     
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n"
@@ -98,7 +126,7 @@ def parse_scenario(text):
 
 def generate_educational_feedback(choice, reason, story_context, rag_data):
     """학생의 선택을 교육과정 성취기준과 연결하여 피드백"""
-    if not rag_data: rag_data = "기본 윤리 원칙"
+    if not rag_data: rag_data = DEFAULT_RAG_DATA
 
     prompt = (
         f"# [교육과정 및 국가 표준]:\n{rag_data}\n\n"
@@ -113,7 +141,7 @@ def generate_educational_feedback(choice, reason, story_context, rag_data):
     )
     return ask_gpt(prompt)
 
-# --- 5. 메인 앱 로직 ---
+# --- 6. 메인 앱 로직 ---
 
 # 세션 초기화
 if 'scenario' not in st.session_state: st.session_state.scenario = None
@@ -121,7 +149,7 @@ if 'scenario_images' not in st.session_state: st.session_state.scenario_images =
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
-if 'rag_text' not in st.session_state: st.session_state.rag_text = load_reference_data()
+if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
 if 'selected_choice' not in st.session_state: st.session_state.selected_choice = None
@@ -141,11 +169,8 @@ if mode == "교사용 (수업 개설)":
     if password == "1234":
         # RAG 데이터 확인
         with st.expander("📚 적용된 교육과정 및 윤리기준 확인"):
-            if not st.session_state.rag_text:
-                st.warning("⚠️ 'reference.txt' 파일이 없습니다. 기본 지식으로 작동합니다.")
-            else:
-                st.info("국가 인공지능 윤리기준, 도덕과/실과 교육과정이 통합 반영되었습니다.")
-                st.text_area("내용 미리보기", st.session_state.rag_text, height=150, disabled=True)
+            st.info("기본 탑재된 국가 인공지능 윤리기준 및 교육과정 내용입니다.")
+            st.text_area("내용 미리보기", st.session_state.rag_text, height=200, disabled=True)
             
             uploaded_file = st.file_uploader("추가 교육 자료 업로드 (txt)", type="txt")
             if uploaded_file:
@@ -195,29 +220,65 @@ if mode == "교사용 (수업 개설)":
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
-    # [A] 튜토리얼
+    # [A] 튜토리얼 (단계별 진행 적용)
     if not st.session_state.tutorial_complete:
         st.header("🎒 연습 시간: 테스트 봇과 친해지기")
+        st.progress((st.session_state.tutorial_step + 1) / 3, text=f"진행률: {st.session_state.tutorial_step + 1}/3 단계")
+
+        # ----------------------------------------------------
+        # 1단계: 버튼 누르기 (여기서 버튼을 눌러야 2단계로 넘어감)
+        # ----------------------------------------------------
         if st.session_state.tutorial_step == 0:
-            st.info("안녕? 나는 테스트 봇이야! 버튼 누르는 연습을 해볼까?")
-            c1, c2 = st.columns(2)
-            if c1.button("🅰️ 여름이 좋아! 🍦"): st.toast("잘했어!"); st.session_state.tutorial_step = 1; st.rerun()
-            if c2.button("🅱️ 겨울이 좋아! ☃️"): st.toast("완벽해!"); st.session_state.tutorial_step = 1; st.rerun()
+            st.markdown("### [1단계] 버튼 누르기 연습")
+            with st.chat_message("assistant", avatar="🤖"):
+                st.write("안녕? 나는 AI 윤리 선생님 '테스트 봇'이야! 👋")
+                st.write("우리 본격적으로 공부하기 전에, 나랑 대화하는 법을 연습해보자.")
+                st.write("**너는 어떤 계절을 더 좋아하니? 아래 버튼을 눌러줘!**")
+            
+            col1, col2 = st.columns(2)
+            if col1.button("🅰️ 더운 여름이 좋아! 🍦", use_container_width=True):
+                st.toast("잘했어! 여름을 좋아하는구나.")
+                st.session_state.tutorial_step = 1 # 다음 단계로 이동
+                st.rerun()
+            if col2.button("🅱️ 추운 겨울이 좋아! ☃️", use_container_width=True):
+                st.toast("완벽해! 겨울을 좋아하는구나.")
+                st.session_state.tutorial_step = 1 # 다음 단계로 이동
+                st.rerun()
+
+        # ----------------------------------------------------
+        # 2단계: 채팅 입력하기 (입력을 해야 3단계로 넘어감)
+        # ----------------------------------------------------
         elif st.session_state.tutorial_step == 1:
-            st.info("이번엔 채팅 연습이야. '안녕'이라고 인사해줄래?")
-            if user_input := st.chat_input("여기에 입력해봐!"):
-                st.balloons(); st.session_state.tutorial_step = 2; st.rerun()
+            st.markdown("### [2단계] 글자 쓰기 연습")
+            with st.chat_message("assistant", avatar="🤖"):
+                st.write("버튼 누르기 성공! 참 잘했어. 👍")
+                st.write("이번에는 아래 채팅창에 **'안녕'**이나 **'반가워'**라고 인사를 써볼래?")
+
+            # 채팅창 (입력 감지 시 다음 단계로)
+            if user_input := st.chat_input("여기에 인사를 적고 엔터(Enter)를 쳐봐!"):
+                st.balloons()
+                st.session_state.tutorial_step = 2 # 다음 단계로 이동
+                st.rerun()
+
+        # ----------------------------------------------------
+        # 3단계: 완료 및 시작
+        # ----------------------------------------------------
         elif st.session_state.tutorial_step == 2:
-            st.success("준비 끝! 이제 수업을 시작하자.")
-            if st.button("🚀 수업 시작!"): st.session_state.tutorial_complete = True; st.rerun()
+            st.markdown("### [완료] 준비 끝!")
+            with st.chat_message("assistant", avatar="🤖"):
+                st.write("완벽해! 이제 수업을 시작할 준비가 다 됐어. 🎉")
+                st.write("아래 버튼을 누르면 진짜 수업이 시작될 거야.")
+
+            if st.button("🚀 수업 시작하기", type="primary", use_container_width=True):
+                st.session_state.tutorial_complete = True # 튜토리얼 종료
+                st.rerun()
 
     # [B] 본 수업
     else:
-        # [변경] 토론하기 -> 학습하기
         st.header(f"🙋‍♂️ 학습하기: {st.session_state.topic}")
 
         if not st.session_state.scenario:
-            st.warning("선생님이 아직 수업을 안 만들었어!")
+            st.warning("선생님이 아직 수업을 안 만들었어! (교사용 모드에서 먼저 만들어주세요)")
         else:
             if st.button("🔄 연습 다시하기", type="secondary"):
                 st.session_state.tutorial_complete = False; st.session_state.tutorial_step = 0; st.rerun()
@@ -269,6 +330,4 @@ elif mode == "학생용 (수업 참여)":
                     if st.session_state.current_step < 3:
                         st.session_state.current_step += 1; st.session_state.selected_choice = None; st.session_state.waiting_for_reason = False; st.session_state.feedback_shown = False; st.session_state.chat_log = []; st.rerun()
                     else:
-                        st.balloons();
-                        # [변경] 토론 -> 학습
-                        st.success("모든 학습이 끝났어! 훌륭해!")
+                        st.balloons(); st.success("모든 학습이 끝났어! 훌륭해!")
