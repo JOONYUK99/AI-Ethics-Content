@@ -149,7 +149,6 @@ if 'scenario_images' not in st.session_state: st.session_state.scenario_images =
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
-# 기본값으로 DEFAULT_RAG_DATA 사용
 if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
@@ -168,9 +167,10 @@ if mode == "교사용 (수업 개설)":
     password = st.text_input("교사 인증 비밀번호 (1234)", type="password")
     
     if password == "1234":
-        # RAG 데이터 확인 (내용 미리보기 제거됨)
+        # RAG 데이터 확인 (텍스트 박스 완전 제거)
         with st.expander("📚 적용된 교육과정 및 윤리기준 확인"):
             st.success("✅ 국가 인공지능 윤리기준 및 교육과정이 기본 탑재되어 있습니다.")
+            st.caption("(내용이 너무 길어 화면에는 표시하지 않지만, AI는 이미 다 알고 있습니다!)")
             
             uploaded_file = st.file_uploader("추가 교육 자료 업로드 (txt)", type="txt")
             if uploaded_file:
