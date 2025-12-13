@@ -4,7 +4,8 @@ import re
 import os
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(page_title="쭈니봇과 함께하는 AI 윤리 교실", page_icon="🏫", layout="wide")
+# [변경] 쭈니봇 -> 테스트 봇
+st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 교실", page_icon="🤖", layout="wide")
 
 # --- 2. OpenAI 클라이언트 설정 ---
 try:
@@ -14,15 +15,16 @@ except Exception:
     st.stop()
 
 # --- 3. [핵심] 교육과정 반영 시스템 페르소나 ---
+# [변경] 페르소나 이름 변경
 SYSTEM_PERSONA = """
-당신은 초등학생(5~6학년)을 위한 AI 윤리 교육 튜터 '쭈니봇'입니다.
+당신은 초등학생(5~6학년)을 위한 AI 윤리 교육 튜터 '테스트 봇'입니다.
 '국가 인공지능 윤리기준', '도덕과 교육과정', '실과(정보) 교육과정'을 기반으로 교육합니다.
 
 [핵심 행동 수칙]
 1. [교육과정 연계]: 설명할 때 "이건 도덕 시간에 배운 '정보 예절'과 관련 있어" 처럼 교과 과정과 연결해주세요.
 2. [개인정보 철벽 방어]: 학생이 개인정보를 말하려 하면 즉시 교육적으로 제지하세요.
 3. [사례 중심]: 추상적인 개념(알고리즘 등)은 학교 생활이나 게임 같은 구체적인 사례로 바꿔 설명하세요.
-4. [말투]: 다정하고 친근한 초등 교사 말투(~해요, ~란다)를 사용하세요.
+4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
 # --- 4. 함수 정의 ---
@@ -192,11 +194,11 @@ if mode == "교사용 (수업 개설)":
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
-    # [A] 튜토리얼 (기존 유지)
+    # [A] 튜토리얼 (이름 변경)
     if not st.session_state.tutorial_complete:
-        st.header("🎒 연습 시간: 쭈니봇과 친해지기")
+        st.header("🎒 연습 시간: 테스트 봇과 친해지기")
         if st.session_state.tutorial_step == 0:
-            st.info("안녕? 나는 쭈니봇이야! 버튼 누르는 연습을 해볼까?")
+            st.info("안녕? 나는 테스트 봇이야! 버튼 누르는 연습을 해볼까?")
             c1, c2 = st.columns(2)
             if c1.button("🅰️ 여름이 좋아! 🍦"): st.toast("잘했어!"); st.session_state.tutorial_step = 1; st.rerun()
             if c2.button("🅱️ 겨울이 좋아! ☃️"): st.toast("완벽해!"); st.session_state.tutorial_step = 1; st.rerun()
@@ -226,8 +228,9 @@ elif mode == "학생용 (수업 참여)":
             if img: st.image(img)
             st.info(data['story'])
 
+            # 대화 기록 표시 (이름 변경)
             for msg in st.session_state.chat_log:
-                role = "쭈니봇" if msg["role"] == "assistant" else "나"
+                role = "테스트 봇" if msg["role"] == "assistant" else "나"
                 avatar = "🤖" if msg["role"] == "assistant" else "🙋"
                 with st.chat_message(msg["role"], avatar=avatar):
                     st.write(msg['content'])
@@ -245,7 +248,8 @@ elif mode == "학생용 (수업 참여)":
                 st.markdown("### 🤔 왜 그렇게 선택했어?")
                 
                 with st.form("reason_form"):
-                    reason_input = st.text_area("이유를 적어주면 쭈니봇이 피드백을 줄 거야!", placeholder="예: 왜냐하면...")
+                    # [변경] 안내 문구 이름 변경
+                    reason_input = st.text_area("이유를 적어주면 테스트 봇이 피드백을 줄 거야!", placeholder="예: 왜냐하면...")
                     submit = st.form_submit_button("입력 완료 💌")
                     
                     if submit:
