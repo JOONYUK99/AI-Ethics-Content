@@ -1,9 +1,10 @@
 import streamlit as st
 from openai import OpenAI
 import re
+import os
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(page_title="쭈니봇과 함께 토론하기", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="쭈니봇과 함께하는 AI 윤리 교실", page_icon="🏫", layout="wide")
 
 # --- 2. OpenAI 클라이언트 설정 ---
 try:
@@ -12,58 +13,74 @@ except Exception:
     st.error("⚠️ OpenAI API 키를 설정해주세요! (.streamlit/secrets.toml 파일 확인)")
     st.stop()
 
-# --- 3. 함수 정의 (GPT/DALL-E 통신 및 로직) ---
+# --- 3. [핵심] 교육과정 반영 시스템 페르소나 ---
+SYSTEM_PERSONA = """
+당신은 초등학생(5~6학년)을 위한 AI 윤리 교육 튜터 '쭈니봇'입니다.
+'국가 인공지능 윤리기준', '도덕과 교육과정', '실과(정보) 교육과정'을 기반으로 교육합니다.
+
+[핵심 행동 수칙]
+1. [교육과정 연계]: 설명할 때 "이건 도덕 시간에 배운 '정보 예절'과 관련 있어" 처럼 교과 과정과 연결해주세요.
+2. [개인정보 철벽 방어]: 학생이 개인정보를 말하려 하면 즉시 교육적으로 제지하세요.
+3. [사례 중심]: 추상적인 개념(알고리즘 등)은 학교 생활이나 게임 같은 구체적인 사례로 바꿔 설명하세요.
+4. [말투]: 다정하고 친근한 초등 교사 말투(~해요, ~란다)를 사용하세요.
+"""
+
+# --- 4. 함수 정의 ---
+
+def load_reference_data():
+    """reference.txt (통합 교육과정 자료) 읽기"""
+    file_path = "reference.txt"
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    else:
+        return None
 
 def ask_gpt(prompt):
-    """GPT-4o에게 질문하고 답을 받는 함수"""
+    """GPT-4o 통신 함수"""
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "당신은 초등학생을 위한 다정한 AI 윤리 선생님 '쭈니봇'입니다. 답변은 친절하고, 학생의 수준에 맞춰 쉬운 용어를 사용하세요."},
+                {"role": "system", "content": SYSTEM_PERSONA},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        st.error(f"GPT 오류 발생: {e}")
+        st.error(f"오류 발생: {e}")
         return None
 
 def generate_image(prompt):
-    """DALL-E 3로 이미지를 생성하는 함수 (NEW ✨)"""
+    """DALL-E 3 이미지 생성 (교육용 삽화)"""
     try:
-        # 초등학생에게 적합한 동화풍 스타일로 프롬프트 수정
-        dalle_prompt = f"A friendly, bright, cartoon-style illustration suitable for children's storybook, depicting the following scene: {prompt}"
-        
+        dalle_prompt = f"A friendly, educational cartoon-style illustration for elementary school textbook, depicting: {prompt}"
         response = client.images.generate(
-            model="dall-e-3",
-            prompt=dalle_prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1,
+            model="dall-e-3", prompt=dalle_prompt, size="1024x1024", quality="standard", n=1
         )
         return response.data[0].url
-    except Exception as e:
-        st.error(f"이미지 생성 오류: {e}")
+    except:
         return None
 
-def create_scenario(topic):
-    """교사가 입력한 주제로 시나리오 생성"""
+def create_scenario(topic, rag_data):
+    """[핵심] 교육과정 및 사례 기반 시나리오 생성"""
+    if not rag_data: rag_data = "기본 윤리: 남에게 피해 주지 않기"
+    
     prompt = (
-        f"주제: '{topic}'\n"
-        "위 주제로 초등학생 고학년 대상의 딜레마 시나리오를 작성해줘.\n"
-        "총 4단계(도입-전개-위기-결말) 구성이어야 해.\n"
-        "각 단계는 3~4문장 정도로 간결하게 써줘.\n" # 이미지 생성을 위해 너무 길지 않게 요청
-        "각 단계 끝에는 반드시 [CHOICE A]와 [CHOICE B] 형태의 선택지가 있어야 해.\n\n"
-        "# 출력 형식 예시:\n"
-        "[STORY 1] 이야기 내용...\n[CHOICE 1A] 선택지 A 내용\n[CHOICE 1B] 선택지 B 내용\n---\n"
-        "[STORY 2] ...\n---\n... (4단계까지)"
+        f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n"
+        f"# 주제: '{topic}'\n\n"
+        "위 '교육과정' 내용을 반영하여, 초등학생이 학교나 일상에서 겪을 법한 '구체적인 사례'로 딜레마 시나리오를 만들어줘.\n"
+        "- 총 4단계(도입-전개-위기-결말)\n"
+        "- 각 단계는 3~4문장\n"
+        "- 각 단계 끝에 [CHOICE A], [CHOICE B] 선택지 포함\n"
+        "- 내용이 너무 어렵지 않게, '친구 관계', '숙제', '게임' 같은 소재 활용\n\n"
+        "# 출력 형식:\n[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n..."
     )
     return ask_gpt(prompt)
 
 def parse_scenario(text):
-    """생성된 텍스트를 구조화"""
+    """시나리오 파싱"""
     if not text: return None
     scenario = []
     parts = text.split('---')
@@ -73,214 +90,179 @@ def parse_scenario(text):
             choice_a = re.search(r"\[CHOICE\s?\dA\](.*?)(?=\[CHOICE)", part, re.DOTALL).group(1).strip()
             choice_b = re.search(r"\[CHOICE\s?\dB\](.*)", part, re.DOTALL).group(1).strip()
             scenario.append({"story": story, "a": choice_a, "b": choice_b})
-        except:
-            continue
+        except: continue
     return scenario if len(scenario) >= 4 else None
 
-def analyze_and_reply(history, user_input):
-    """학생의 의견(자유 토론)을 분석하고 답변 생성"""
+def generate_educational_feedback(choice, reason, story_context, rag_data):
+    """[핵심] 학생의 선택을 교육과정 성취기준과 연결하여 피드백"""
+    if not rag_data: rag_data = "기본 윤리 원칙"
+
     prompt = (
-        f"지금까지의 대화:\n{history}\n\n"
-        f"학생의 의견: {user_input}\n\n"
-        "학생의 의견에 공감해주고, 더 깊은 생각을 끌어내는 추가 질문을 하나 던져줘.\n"
-        "말투는 '대단해!', '좋은 생각이야' 처럼 격려하는 말투로 해줘."
+        f"# [교육과정 및 국가 표준]:\n{rag_data}\n\n"
+        f"# [현재 상황]:\n{story_context}\n\n"
+        f"# [학생의 선택]: {choice}\n"
+        f"# [학생의 이유]: {reason}\n\n"
+        "위 내용을 바탕으로 초등학생에게 줄 교육적 피드백을 작성해줘.\n"
+        "1. [공감과 칭찬]: 학생의 솔직한 생각에 먼저 공감해주고 칭찬해줘.\n"
+        "2. [교육과정 연계]: 학생의 이유가 위 '교육과정'의 어떤 내용(예: 도덕과 정보예절, 실과 개인정보보호 등)과 연결되는지 구체적으로 설명해줘.\n"
+        "3. [사고 확장 질문]: 반대 입장을 생각해보게 하는 질문을 하나 던져줘.\n"
+        "4. [수정 지도]: 비속어나 개인정보가 포함되어 있다면 따뜻하게 고쳐줘."
     )
     return ask_gpt(prompt)
 
-# --- 4. 메인 앱 로직 ---
+# --- 5. 메인 앱 로직 ---
 
-# 세션 상태 초기화
+# 세션 초기화
 if 'scenario' not in st.session_state: st.session_state.scenario = None
-if 'scenario_images' not in st.session_state: st.session_state.scenario_images = [None, None, None, None] # 이미지 URL 저장용
+if 'scenario_images' not in st.session_state: st.session_state.scenario_images = [None]*4
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
+if 'rag_text' not in st.session_state: st.session_state.rag_text = load_reference_data()
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
+if 'selected_choice' not in st.session_state: st.session_state.selected_choice = None
+if 'waiting_for_reason' not in st.session_state: st.session_state.waiting_for_reason = False
+if 'feedback_shown' not in st.session_state: st.session_state.feedback_shown = False
 
-# --- 사이드바: 모드 선택 ---
-st.sidebar.title("🏫 수업 모드 설정")
+st.sidebar.title("🏫 AI 윤리 교실 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
 
 # ==========================================
-# 👨‍🏫 교사용 화면 (Teacher Mode)
+# 👨‍🏫 교사용 화면
 # ==========================================
 if mode == "교사용 (수업 개설)":
-    st.header("👨‍🏫 교사용: 수업 만들기")
-    st.info("이곳에서 수업 주제를 정하고 시나리오를 생성합니다.")
-
-    password = st.text_input("교사 인증 비밀번호 (기본: 1234)", type="password")
+    st.header("👨‍🏫 교사용: 교육과정 기반 수업 만들기")
+    password = st.text_input("교사 인증 비밀번호 (1234)", type="password")
     
     if password == "1234":
-        input_topic = st.text_area("오늘의 토론 주제 입력", value=st.session_state.topic, height=100)
+        # RAG 데이터 확인
+        with st.expander("📚 적용된 교육과정 및 윤리기준 확인"):
+            if not st.session_state.rag_text:
+                st.warning("⚠️ 'reference.txt' 파일이 없습니다. 기본 지식으로 작동합니다.")
+            else:
+                st.info("국가 인공지능 윤리기준, 도덕과/실과 교육과정이 통합 반영되었습니다.")
+                st.text_area("내용 미리보기", st.session_state.rag_text, height=150, disabled=True)
+            
+            # 파일 업로드 기능 (추가 자료용)
+            uploaded_file = st.file_uploader("추가 교육 자료 업로드 (txt)", type="txt")
+            if uploaded_file:
+                string_data = uploaded_file.getvalue().decode("utf-8")
+                # 기존 자료에 덧붙이기
+                st.session_state.rag_text += "\n\n[추가 자료]\n" + string_data
+                st.success("✅ 추가 자료가 교육과정에 통합되었습니다!")
+
+        input_topic = st.text_area("오늘의 수업 주제 (예: 딥페이크, AI 저작권, 챗봇 예절)", value=st.session_state.topic)
+        st.caption("💡 팁: '딥페이크'라고만 적어도 교육과정에 맞춰 '친구 얼굴 합성 사례' 등을 만들어줍니다.")
         
-        # 1. 텍스트 시나리오 생성 버튼
-        if st.button("🚀 시나리오(텍스트) 생성하기"):
-            with st.spinner("쭈니봇이 이야기를 만들고 있어요..."):
-                raw_text = create_scenario(input_topic)
-                parsed_data = parse_scenario(raw_text)
-                
-                if parsed_data:
-                    st.session_state.scenario = parsed_data
+        if st.button("🚀 교육 시나리오 생성"):
+            with st.spinner("교육과정 성취 기준에 맞춰 시나리오를 설계 중입니다..."):
+                # RAG 데이터를 함께 넘겨서 시나리오 생성
+                raw = create_scenario(input_topic, st.session_state.rag_text)
+                parsed = parse_scenario(raw)
+                if parsed:
+                    st.session_state.scenario = parsed
                     st.session_state.topic = input_topic
                     st.session_state.current_step = 0
-                    st.session_state.chat_log = [] 
-                    st.session_state.scenario_images = [None, None, None, None] # 이미지 초기화
-                    st.success("✅ 텍스트 시나리오가 완성되었습니다! 아래에서 삽화를 추가해보세요.")
-                else:
-                    st.error("시나리오 생성 실패. 다시 시도해주세요.")
-
-        # 2. 이미지 생성 섹션 (시나리오가 있을 때만 표시) (NEW ✨)
+                    st.session_state.chat_log = []
+                    st.session_state.scenario_images = [None]*4
+                    st.session_state.selected_choice = None
+                    st.session_state.waiting_for_reason = False
+                    st.session_state.feedback_shown = False
+                    st.success("교육과정 연계 시나리오 생성 완료!")
+        
         if st.session_state.scenario:
             st.write("---")
-            st.subheader("🖼️ (선택사항) 이야기 삽화 만들기")
-            st.info("각 단계의 이야기를 바탕으로 AI가 그림을 그려줍니다. (장당 약 10~20초 소요)")
-
+            st.subheader("🖼️ 교육용 삽화 생성")
             cols = st.columns(4)
             for i in range(4):
                 with cols[i]:
-                    st.markdown(f"**Part {i+1} 삽화**")
-                    # 이미 생성된 이미지가 있으면 보여주기
+                    st.markdown(f"**단계 {i+1}**")
                     if st.session_state.scenario_images[i]:
-                        st.image(st.session_state.scenario_images[i], use_column_width=True)
-                        st.caption("✅ 생성 완료")
-                    
-                    # 이미지 생성 버튼
-                    story_text = st.session_state.scenario[i]['story']
-                    if st.button(f"✨ 그림 생성 ({i+1}단계)", key=f"gen_btn_{i}"):
-                        with st.spinner("그림 그리는 중... 🎨"):
-                            img_url = generate_image(story_text)
-                            if img_url:
-                                st.session_state.scenario_images[i] = img_url
-                                st.rerun() # 이미지 표시를 위해 새로고침
-
-            st.write("---")
-            st.success("모든 준비가 끝나면 '학생용 모드'로 변경해주세요!")
-
-    elif password:
-        st.error("비밀번호가 틀렸습니다.")
+                        st.image(st.session_state.scenario_images[i])
+                    if st.button(f"그림 생성 {i+1}", key=f"gen_{i}"):
+                        with st.spinner("그리는 중..."):
+                            url = generate_image(st.session_state.scenario[i]['story'])
+                            if url:
+                                st.session_state.scenario_images[i] = url
+                                st.rerun()
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면 (Student Mode)
+# 🙋‍♂️ 학생용 화면
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
-    # [A] 튜토리얼 (연습 모드) - (기존과 동일)
+    # [A] 튜토리얼 (기존 유지)
     if not st.session_state.tutorial_complete:
         st.header("🎒 연습 시간: 쭈니봇과 친해지기")
-        # ... (튜토리얼 코드는 길이상 생략, 기존 코드 그대로 유지됨) ...
-        # 실제 실행시에는 이 부분에 이전 답변의 튜토리얼 코드가 그대로 들어갑니다.
-        # 튜토리얼 1단계: 버튼 누르기 연습
         if st.session_state.tutorial_step == 0:
-            st.markdown("""
-            ### 1단계: 버튼 누르기 연습
-            **쭈니봇:** 안녕? 나는 쭈니봇이야! 너는 어떤 계절을 더 좋아해? 
-            아래 버튼 중 하나를 꾹 눌러봐!
-            """)
-            col1, col2 = st.columns(2)
-            if col1.button("🅰️ 더운 여름이 좋아! 🍦"):
-                st.toast("잘했어! 버튼은 이렇게 누르는 거야.")
-                st.session_state.tutorial_step = 1
-                st.rerun()
-            if col2.button("🅱️ 추운 겨울이 좋아! ☃️"):
-                st.toast("완벽해! 버튼은 이렇게 누르는 거야.")
-                st.session_state.tutorial_step = 1
-                st.rerun()
-
-        # 튜토리얼 2단계: 채팅 입력 연습
+            st.info("안녕? 나는 쭈니봇이야! 버튼 누르는 연습을 해볼까?")
+            c1, c2 = st.columns(2)
+            if c1.button("🅰️ 여름이 좋아! 🍦"): st.toast("잘했어!"); st.session_state.tutorial_step = 1; st.rerun()
+            if c2.button("🅱️ 겨울이 좋아! ☃️"): st.toast("완벽해!"); st.session_state.tutorial_step = 1; st.rerun()
         elif st.session_state.tutorial_step == 1:
-            st.markdown("""
-            ### 2단계: 채팅하기 연습
-            **쭈니봇:** 버튼 누르기 성공! 👍
-            이번에는 나한테 인사를 건네줄래?
-            아래 입력창에 **"안녕"**이나 **"반가워"**라고 쓰고 엔터(Enter)를 쳐봐!
-            """)
-            
-            if user_input := st.chat_input("여기에 인사를 적어봐!"):
-                st.balloons()
-                st.session_state.tutorial_step = 2
-                st.rerun()
-
-        # 튜토리얼 완료
+            st.info("이번엔 채팅 연습이야. '안녕'이라고 인사해줄래?")
+            if user_input := st.chat_input("여기에 입력해봐!"):
+                st.balloons(); st.session_state.tutorial_step = 2; st.rerun()
         elif st.session_state.tutorial_step == 2:
-            st.success("🎉 연습 끝! 이제 진짜 수업을 시작할 준비가 다 됐어.")
-            if st.button("🚀 수업 시작하러 가기!"):
-                st.session_state.tutorial_complete = True
-                st.rerun()
+            st.success("준비 끝! 이제 수업을 시작하자.")
+            if st.button("🚀 수업 시작!"): st.session_state.tutorial_complete = True; st.rerun()
 
-
-    # [B] 본 수업 (Main Scenario)
+    # [B] 본 수업
     else:
-        st.header(f"🙋‍♂️ 쭈니봇과 토론하기: {st.session_state.topic if st.session_state.topic else '주제 미정'}")
+        st.header(f"🙋‍♂️ 토론하기: {st.session_state.topic}")
 
         if not st.session_state.scenario:
-            st.warning("⚠️ 선생님이 아직 수업을 만들지 않았어요. 조금만 기다려주세요!")
+            st.warning("선생님이 아직 수업을 안 만들었어!")
         else:
-            # 상단: 튜토리얼 다시하기 버튼
-            if st.button("🔄 사용법 다시 연습하기", type="secondary"):
-                st.session_state.tutorial_complete = False
-                st.session_state.tutorial_step = 0
-                st.rerun()
+            if st.button("🔄 연습 다시하기", type="secondary"):
+                st.session_state.tutorial_complete = False; st.session_state.tutorial_step = 0; st.rerun()
 
-            # 현재 단계 데이터 가져오기
-            current_idx = st.session_state.current_step
-            step_data = st.session_state.scenario[current_idx]
-            step_image = st.session_state.scenario_images[current_idx] # 해당 단계 이미지 URL
-            
-            st.markdown(f"### 📖 이야기 Part {current_idx + 1}")
+            idx = st.session_state.current_step
+            data = st.session_state.scenario[idx]
+            img = st.session_state.scenario_images[idx]
 
-            # [NEW ✨] 이미지가 있으면 표시
-            if step_image:
-                st.image(step_image, use_column_width=True)
+            st.markdown(f"### 📖 Part {idx + 1}")
+            if img: st.image(img)
+            st.info(data['story'])
 
-            # 1. 이야기 텍스트 보여주기
-            st.write(step_data['story'])
-            
-            # 2. 선택지 버튼 (A / B)
-            col1, col2 = st.columns(2)
-            if col1.button(f"🅰️ {step_data['a']}", use_container_width=True):
-                st.session_state.chat_log.append({"role": "user", "content": f"선택: {step_data['a']}"})
-                st.session_state.chat_log.append({"role": "assistant", "content": "그 선택을 했구나! 왜 그렇게 생각했는지 이유를 말해줄래?"})
-                st.rerun()
-
-            if col2.button(f"🅱️ {step_data['b']}", use_container_width=True):
-                st.session_state.chat_log.append({"role": "user", "content": f"선택: {step_data['b']}"})
-                st.session_state.chat_log.append({"role": "assistant", "content": "흥미로운 선택이야! 왜 그런 결정을 내렸어?"})
-                st.rerun()
-
-            st.markdown("---")
-
-            # 3. 채팅창 (자유 의견 입력)
-            # 이전 대화 기록 표시
             for msg in st.session_state.chat_log:
                 role = "쭈니봇" if msg["role"] == "assistant" else "나"
                 avatar = "🤖" if msg["role"] == "assistant" else "🙋"
                 with st.chat_message(msg["role"], avatar=avatar):
-                    st.write(f"**{role}:** {msg['content']}")
+                    st.write(msg['content'])
 
-            # 의견 입력창 활성화
-            if user_input := st.chat_input("여기에 내 생각을 자유롭게 적어봐!"):
-                # 내 의견 표시
-                st.session_state.chat_log.append({"role": "user", "content": user_input})
-                with st.chat_message("user", avatar="🙋"):
-                    st.write(user_input)
+            if not st.session_state.waiting_for_reason and not st.session_state.feedback_shown:
+                st.write("### 👇 너의 선택은?")
+                c1, c2 = st.columns(2)
+                if c1.button(f"🅰️ {data['a']}", use_container_width=True):
+                    st.session_state.selected_choice = data['a']; st.session_state.waiting_for_reason = True; st.rerun()
+                if c2.button(f"🅱️ {data['b']}", use_container_width=True):
+                    st.session_state.selected_choice = data['b']; st.session_state.waiting_for_reason = True; st.rerun()
 
-                # 쭈니봇의 답변 생성 (GPT)
-                with st.chat_message("assistant", avatar="🤖"):
-                    with st.spinner("쭈니봇이 생각 중..."):
-                        history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_log])
-                        reply = analyze_and_reply(history_text, user_input)
-                        
-                        st.write(reply)
-                        st.session_state.chat_log.append({"role": "assistant", "content": reply})
+            elif st.session_state.waiting_for_reason:
+                st.success(f"**선택:** {st.session_state.selected_choice}")
+                st.markdown("### 🤔 왜 그렇게 선택했어?")
+                
+                with st.form("reason_form"):
+                    reason_input = st.text_area("이유를 적어주면 쭈니봇이 피드백을 줄 거야!", placeholder="예: 왜냐하면...")
+                    submit = st.form_submit_button("입력 완료 💌")
+                    
+                    if submit:
+                        if not reason_input.strip():
+                            st.warning("이유를 꼭 적어줘!")
+                        else:
+                            st.session_state.chat_log.append({"role": "user", "content": f"선택: {st.session_state.selected_choice}\n이유: {reason_input}"})
+                            with st.spinner("교육과정 성취기준 분석 중..."):
+                                feedback = generate_educational_feedback(
+                                    st.session_state.selected_choice, reason_input, data['story'], st.session_state.rag_text
+                                )
+                                st.session_state.chat_log.append({"role": "assistant", "content": feedback})
+                            st.session_state.waiting_for_reason = False; st.session_state.feedback_shown = True; st.rerun()
 
-            # 4. 다음 단계로 넘어가기 버튼
-            if len(st.session_state.chat_log) > 2: 
-                if st.button("다음 이야기로 넘어가기 ➡️"):
+            elif st.session_state.feedback_shown:
+                if st.button("다음 이야기로 넘어가기 ➡️", type="primary"):
                     if st.session_state.current_step < 3:
-                        st.session_state.current_step += 1
-                        st.session_state.chat_log = [] 
-                        st.rerun()
+                        st.session_state.current_step += 1; st.session_state.selected_choice = None; st.session_state.waiting_for_reason = False; st.session_state.feedback_shown = False; st.session_state.chat_log = []; st.rerun()
                     else:
-                        st.balloons()
-                        st.success("모든 토론이 끝났어! 정말 멋진 생각들이었어. 👏👏")
+                        st.balloons(); st.success("모든 토론이 끝났어! 훌륭해!")
