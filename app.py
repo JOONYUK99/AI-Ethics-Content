@@ -1,11 +1,19 @@
 import streamlit as st
-import google.generativeai as genai
+from openai import OpenAI
 import re
 
-# --- 1. 페이지 설정 (제목 적용) ---
+# --- 1. 페이지 설정 ---
 st.set_page_config(page_title="쭈니봇과 함께 토론하기", page_icon="🤖")
 
-# --- 2. 예시 주제 데이터 ---
+# --- 2. OpenAI 클라이언트 설정 ---
+try:
+    # secrets.toml 파일에 OPENAI_API_KEY가 있어야 합니다.
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+except Exception:
+    st.error("⚠️ OpenAI API 키를 설정해주세요! (.streamlit/secrets.toml 파일 확인)")
+    st.stop()
+
+# --- 3. 예시 주제 데이터 ---
 EXAMPLE_TOPICS = {
     "AI 예술과 저작권": "최근 열린 미술 대회에서 AI로 그린 그림이 1등을 차지해 큰 논란이 되었습니다. 그림을 그린 학생은 AI에게 수백 번의 지시어를 입력하며 원하는 그림을 얻었다고 주장합니다. 이 그림의 저작권은 누구에게 있어야 할까요?",
     "자율주행차의 딜레마": "자율주행차가 갑자기 나타난 아이들을 피하려고 핸들을 꺾으면, 차에 타고 있던 내가 다칠 수 있는 위험한 상황에 처했습니다. 이때 자율주행차는 어떤 선택을 해야 할까요?",
@@ -14,29 +22,28 @@ EXAMPLE_TOPICS = {
     "AI 추천의 편향성": "새로 나온 동영상 앱을 사용하는데, 나에게는 항상 아이돌 춤 영상만 추천되고, 내 남동생에게는 게임 영상만 추천되는 것을 발견했습니다. 나는 게임도 좋아하는데 왜 앱은 나에게 게임 영상을 보여주지 않는 걸까요?"
 }
 
-# --- 3. 기본 설정 및 함수 ---
-# API 키 설정 (Streamlit secrets 사용)
-try:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-except Exception:
-    st.error("⚠️ 구글 API 키를 설정해주세요! (.streamlit/secrets.toml 파일 확인)")
-    st.stop()
+# --- 4. AI 로직 함수들 (GPT-4o 적용) ---
 
-def get_model():
-    """
-    모델 설정 함수
-    * 404 오류가 계속 나면 'gemini-1.5-flash' 대신 'gemini-pro'로 바꿔보세요.
-    * 하지만 근본적인 해결책은 'pip install --upgrade google-generativeai' 입니다.
-    """
-    return genai.GenerativeModel('gemini-1.5-flash')
-
-# --- 4. AI 로직 함수들 ---
+def ask_gpt(prompt):
+    """OpenAI GPT-4o 모델에게 질문하고 답을 받는 공통 함수"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 최신 GPT-4o 모델 사용
+            messages=[
+                {"role": "system", "content": "당신은 초등학생을 위한 다정한 AI 윤리 선생님 '쭈니봇'입니다. 답변은 항상 친절하고 이해하기 쉽게 해주세요."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7  # 창의성과 일관성의 균형
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        st.error(f"GPT 응답 오류가 발생했어요: {e}")
+        return None
 
 def transform_scenario(teacher_input):
-    """선생님의 입력을 바탕으로 시나리오 생성"""
-    model = get_model()
+    """시나리오 생성"""
     prompt = (
-        "당신은 초등학생 고학년 눈높이에 맞춰 AI 윤리 교육용 인터랙티브 시나리오를 작성하는 전문 작가 '쭈니봇'입니다.\n"
+        "당신은 초등학생 고학년 눈높이에 맞춰 AI 윤리 교육용 인터랙티브 시나리오를 작성하는 전문 작가입니다.\n"
         "아래 '입력 내용'을 바탕으로, 학생들이 몰입할 수 있는 완결된 이야기를 만들어 주세요.\n"
         "이야기는 총 4개의 파트로 구성되며, 각 파트 끝에는 주인공의 고민이 드러나는 두 가지 선택지를 제시해야 합니다.\n\n"
         
@@ -48,70 +55,50 @@ def transform_scenario(teacher_input):
         
         f"--- 입력 내용 ---\n{teacher_input}"
     )
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        st.error(f"시나리오 생성 중 오류가 발생했어요: {e}")
-        return None
+    return ask_gpt(prompt)
 
 def analyze_student_response(debate_history):
     """학생 답변 분석 (감독 AI)"""
-    model = get_model()
     prompt = (
-        "당신은 학생의 토론 능력을 분석하는 교육 전문가입니다.\n"
-        "아래 토론 내용 중 학생의 마지막 답변을 보고 다음 4가지 중 하나로 평가해주세요.\n\n"
+        "아래 토론 내용 중 학생의 마지막 답변을 보고 다음 4가지 중 하나로 평가해주세요.\n"
+        "답변은 오직 키워드만 출력하세요.\n\n"
         "# 평가 옵션:\n"
-        "- 깊게 파고들기: 학생이 이해를 잘함. 심화 질문 필요.\n"
-        "- 토론 이어가기: 무난한 진행.\n"
-        "- 쉽게 질문하기: 학생이 어려워함. 쉬운 질문 필요.\n"
-        "- 토론 마무리하기: 주제 이탈 또는 부담감. 마무리 필요.\n\n"
-        f"--- 토론 내용 ---\n{debate_history}\n\n"
-        "# 평가 결과 (옵션 중 하나만 선택):"
+        "- 깊게 파고들기\n"
+        "- 토론 이어가기\n"
+        "- 쉽게 질문하기\n"
+        "- 토론 마무리하기\n\n"
+        f"--- 토론 내용 ---\n{debate_history}"
     )
-    try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        if "깊게 파고들기" in text: return "deepen"
-        elif "쉽게 질문하기" in text: return "simplify"
-        elif "토론 마무리하기" in text: return "end_early"
-        else: return "continue"
-    except Exception:
-        return "continue"
+    response = ask_gpt(prompt)
+    if response:
+        if "깊게" in response: return "deepen"
+        if "쉽게" in response: return "simplify"
+        if "마무리" in response: return "end_early"
+    return "continue"
 
 def generate_simpler_question(debate_history):
     """쉬운 질문 생성"""
-    model = get_model()
     prompt = (
-        "당신은 다정한 AI 친구 '쭈니봇'입니다.\n"
-        "학생이 답변을 어려워합니다. 격려하며 '예/아니오'나 '선택지' 형태의 쉬운 질문을 해주세요.\n\n"
+        "학생이 답변을 어려워합니다. 격려하며 '예/아니오'나 '선택지' 형태의 쉬운 질문을 해주세요.\n"
         f"--- 토론 내용 ---\n{debate_history}\n\n"
         "쭈니봇의 쉬운 질문:"
     )
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception:
-        return "조금 어려운가요? 괜찮아요! 그럼 간단하게 다시 생각해볼까요?"
+    return ask_gpt(prompt)
 
 def continue_debate(debate_history, level="normal"):
     """일반/심화 질문 생성"""
-    model = get_model()
     instruction = "반론을 제기하거나 관점을 바꾸는 심화 질문을 해주세요." if level == "deepen" else "생각의 폭을 넓히는 다음 질문을 해주세요."
     prompt = (
-        f"당신은 다정한 AI 친구 '쭈니봇'입니다. {instruction}\n"
-        "학생의 의견을 깊이 공감하고 존중해주세요. 말투는 친근하게 해요체(~해요)를 써주세요.\n\n"
+        f"{instruction}\n"
+        "학생의 의견을 깊이 공감하고 존중해주세요. 말투는 친근하게 해요체(~해요)를 써주세요.\n"
         f"--- 토론 내용 ---\n{debate_history}\n\n"
         "쭈니봇의 다음 질문:"
     )
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception:
-        return "좋은 생각이네요! 또 다른 생각은 없나요?"
+    return ask_gpt(prompt)
 
 def parse_and_store_scenario(generated_text):
     """생성된 텍스트 파싱"""
+    if not generated_text: return False
     st.session_state.full_scenario = []
     parts = generated_text.split('---')
     if len(parts) < 4: return False
@@ -127,31 +114,25 @@ def parse_and_store_scenario(generated_text):
 
 def start_debate(history, choice):
     """토론 시작 질문"""
-    model = get_model()
     prompt = (
-        "당신은 다정한 AI 친구 '쭈니봇'입니다. 학생의 선택을 지지하며 자연스럽게 토론을 시작하는 첫 질문을 해주세요.\n"
+        "학생의 선택을 지지하며 자연스럽게 토론을 시작하는 첫 질문을 해주세요.\n"
         f"--- 이야기와 선택 ---\n{history}\n학생의 선택: {choice}\n\n쭈니봇:"
     )
-    try:
-        response = model.generate_content(prompt); return response.text.strip()
-    except Exception: return "선택했군요! 왜 그런 선택을 했는지 궁금해요."
+    return ask_gpt(prompt)
 
 def generate_conclusion(final_history):
     """최종 피드백"""
-    model = get_model()
     prompt = (
-        "당신은 다정한 AI 친구 '쭈니봇'입니다. 학생의 전체 토론 기록을 보고, 정답보다는 고민하는 과정이 중요했음을 칭찬하는 따뜻한 마무리 멘트를 해주세요.\n"
+        "학생의 전체 토론 기록을 보고, 정답보다는 고민하는 과정이 중요했음을 칭찬하는 따뜻한 마무리 멘트를 해주세요.\n"
         f"--- 전체 기록 ---\n{final_history}"
     )
-    try:
-        response = model.generate_content(prompt); return response.text.strip()
-    except Exception: return "정말 수고했어요! 훌륭한 토론이었습니다."
+    return ask_gpt(prompt)
 
-# --- 5. 메인 앱 로직 ---
+# --- 5. 메인 앱 로직 (UI) ---
 
 def run_main_app():
-    st.header("🤖 쭈니봇과 함께 토론하기")
-    st.caption("AI 윤리 문제, 쭈니봇과 함께 이야기하며 답을 찾아봐요!")
+    st.header("🤖 쭈니봇과 함께 토론하기 (GPT-4o ver.)")
+    st.caption("OpenAI GPT-4o 모델이 이야기를 만들어줍니다.")
 
     # 세션 초기화
     if 'stage' not in st.session_state:
@@ -162,7 +143,7 @@ def run_main_app():
         st.session_state.debate_turns = 0
         st.session_state.debate_finished = False
 
-    MAX_DEBATE_REPLIES = 3  # 토론 턴 수 제한
+    MAX_DEBATE_REPLIES = 3
 
     def restart():
         for key in ['stage', 'full_scenario', 'full_log', 'current_part', 'debate_turns', 'debate_finished']:
@@ -186,7 +167,7 @@ def run_main_app():
             if not teacher_input.strip():
                 st.warning("내용을 입력해주세요.")
             else:
-                with st.spinner("쭈니봇이 이야기를 만들고 있어요..."):
+                with st.spinner("쭈니봇(GPT)이 이야기를 만들고 있어요..."):
                     scenario_text = transform_scenario(teacher_input)
                     
                     if scenario_text and parse_and_store_scenario(scenario_text):
@@ -220,7 +201,6 @@ def run_main_app():
 
     # [3단계] 토론 진행
     elif st.session_state.stage == 'debate':
-        # 채팅 UI 표시
         for msg in st.session_state.full_log.split('\n\n'):
             msg = msg.strip()
             if not msg: continue
@@ -229,7 +209,6 @@ def run_main_app():
             elif msg.startswith("나 (의견"): st.chat_message("user", avatar="🙋").write(msg)
             elif "### 📖 이야기" in msg: st.markdown(msg)
 
-        # 토론 종료 처리
         if st.session_state.debate_finished:
             st.success("이번 토론이 끝났어!")
             is_last = st.session_state.current_part >= len(st.session_state.full_scenario) - 1
@@ -241,7 +220,6 @@ def run_main_app():
                 st.rerun()
         
         else:
-            # 1. 쭈니봇 첫 질문
             if st.session_state.debate_turns == 0:
                 with st.chat_message("assistant", avatar="🤖"):
                     with st.spinner("쭈니봇이 생각 중..."):
@@ -251,14 +229,12 @@ def run_main_app():
                         st.session_state.full_log += f"\n\n쭈니봇: {q}"
                         st.session_state.debate_turns = 1
 
-            # 2. 학생 답변 입력
             elif st.session_state.debate_turns % 2 != 0:
                 if user_input := st.chat_input(f"내 생각 말하기 ({ (st.session_state.debate_turns+1)//2 }/{MAX_DEBATE_REPLIES})"):
                     st.session_state.full_log += f"\n\n나 (의견): {user_input}"
                     st.session_state.debate_turns += 1
                     st.rerun()
 
-            # 3. 쭈니봇 반응 및 다음 질문
             else:
                 with st.chat_message("assistant", avatar="🤖"):
                     with st.spinner("쭈니봇이 답변을 읽고 있어요..."):
@@ -295,6 +271,5 @@ def run_main_app():
         if st.button("처음으로 돌아가기"):
             restart()
 
-# 앱 실행
 if __name__ == "__main__":
     run_main_app()
