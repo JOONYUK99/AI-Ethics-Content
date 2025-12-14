@@ -232,10 +232,10 @@ if mode == "교사용 (수업 개설)":
                                 st.rerun()
                 with col_img:
                     if st.session_state.scenario_images[i]:
-                        st.image(st.session_state.scenario_images[i], width=300)
+                        st.image(st.session_state.scenario_images[i], width=400)
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면
+# 🙋‍♂️ 학생용 화면 (글자 크기/스타일 수정됨)
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
@@ -244,11 +244,12 @@ elif mode == "학생용 (수업 참여)":
         st.header("🎒 연습 시간: 테스트 봇과 친해지기")
         st.progress((st.session_state.tutorial_step + 1) / 3, text=f"진행률: {st.session_state.tutorial_step + 1}/3 단계")
 
+        # 1단계
         if st.session_state.tutorial_step == 0:
-            st.markdown("### [1단계] 버튼 누르기 연습")
+            st.markdown("### 1단계: 버튼 누르기 연습")
             with st.chat_message("assistant", avatar="🤖"):
-                st.write("안녕? 나는 AI 윤리 선생님 '테스트 봇'이야! 👋")
-                st.write("너는 어떤 계절을 더 좋아하니? 아래 버튼을 눌러줘!")
+                st.markdown("안녕? 나는 AI 윤리 선생님 '테스트 봇'이야! 👋") # 글자 크기 유지
+                st.markdown("너는 어떤 계절을 더 좋아하니? 아래 버튼을 눌러줘!")
             col1, col2 = st.columns(2)
             if col1.button("🅰️ 더운 여름이 좋아! 🍦", use_container_width=True):
                 st.toast("잘했어! 여름을 좋아하는구나.")
@@ -257,19 +258,22 @@ elif mode == "학생용 (수업 참여)":
                 st.toast("완벽해! 겨울을 좋아하는구나.")
                 st.session_state.tutorial_step = 1; st.rerun()
 
+        # 2단계
         elif st.session_state.tutorial_step == 1:
-            st.markdown("### [2단계] 글자 쓰기 연습")
+            st.markdown("### 2단계: 글자 쓰기 연습")
             with st.chat_message("assistant", avatar="🤖"):
-                st.write("버튼 누르기 성공! 참 잘했어. 👍")
-                st.write("이번에는 아래 채팅창에 **'안녕'**이나 **'반가워'**라고 인사를 써볼래?")
+                st.markdown("버튼 누르기 성공! 참 잘했어. 👍")
+                # ** 볼드체 제거하고 글자 크기 키움
+                st.markdown('<p style="font-size:1.15em;">이번에는 아래 채팅창에 <b>\'안녕\'</b>이나 <b>\'반가워\'</b>라고 인사를 써볼래?</p>', unsafe_allow_html=True)
             if user_input := st.chat_input("여기에 인사를 적고 엔터(Enter)를 쳐봐!"):
                 st.balloons(); st.session_state.tutorial_step = 2; st.rerun()
 
+        # 3단계
         elif st.session_state.tutorial_step == 2:
-            st.markdown("### [완료] 준비 끝!")
+            st.markdown("### 완료: 준비 끝!")
             with st.chat_message("assistant", avatar="🤖"):
-                st.write("완벽해! 이제 수업을 시작할 준비가 다 됐어. 🎉")
-                st.write("아래 버튼을 누르면 진짜 수업이 시작될 거야.")
+                st.markdown("완벽해! 이제 수업을 시작할 준비가 다 됐어. 🎉")
+                st.markdown("아래 버튼을 누르면 진짜 수업이 시작될 거야.")
             if st.button("🚀 수업 시작하기", type="primary", use_container_width=True):
                 st.session_state.tutorial_complete = True; st.rerun()
 
@@ -298,7 +302,8 @@ elif mode == "학생용 (수업 참여)":
                     st.write(msg['content'])
 
             if not st.session_state.waiting_for_reason and not st.session_state.feedback_shown:
-                st.write("### 👇 너의 선택은?")
+                # 글자 크기 키움
+                st.markdown('<p style="font-size:1.2em;">👇 너의 선택은?</p>', unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 if c1.button(f"🅰️ {data['a']}", use_container_width=True):
                     st.session_state.selected_choice = data['a']; st.session_state.waiting_for_reason = True; st.rerun()
@@ -306,8 +311,8 @@ elif mode == "학생용 (수업 참여)":
                     st.session_state.selected_choice = data['b']; st.session_state.waiting_for_reason = True; st.rerun()
 
             elif st.session_state.waiting_for_reason:
-                st.success(f"**선택:** {st.session_state.selected_choice}")
-                st.markdown("### 🤔 왜 그렇게 선택했어?")
+                st.success(f"선택: {st.session_state.selected_choice}")
+                st.markdown('<p style="font-size:1.2em;">🤔 왜 그렇게 선택했어?</p>', unsafe_allow_html=True)
                 
                 with st.form("reason_form"):
                     reason_input = st.text_area("이유를 적어주면 테스트 봇이 피드백을 줄 거야!", placeholder="예: 왜냐하면...")
@@ -347,7 +352,6 @@ elif mode == "학생용 (수업 참여)":
 
     # [C] 학습 완료 리포트 화면
     else:
-        st.balloons()
         st.header("🎉 학습 완료! 참 잘했어!")
         st.subheader("📝 나의 학습 리포트")
         
@@ -362,8 +366,8 @@ elif mode == "학생용 (수업 참여)":
         
         for record in st.session_state.learning_records:
             with st.expander(f"{record['step']}단계에서의 선택"):
-                st.write(f"**선택:** {record['choice']}")
-                st.write(f"**나의 생각:** {record['reason']}")
+                st.markdown(f'<p style="font-size:1.05em;"><b>선택:</b> {record["choice"]}</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="font-size:1.05em;"><b>나의 생각:</b> {record["reason"]}</p>', unsafe_allow_html=True)
         
         if st.button("🔄 처음부터 다시 하기", type="primary"):
             st.session_state.lesson_complete = False
