@@ -1,216 +1,34 @@
-import streamlit as st
-from openai import OpenAI
-import re
-import os
-
-# --- 1. 페이지 설정 ---
-st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", page_icon="🤖", layout="wide")
-
-# --- 2. OpenAI 클라이언트 설정 ---
-try:
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-except Exception:
-    st.error("⚠️ OpenAI API 키를 설정해주세요! (.streamlit/secrets.toml 파일 확인)")
-    st.stop()
-
-# --- 3. 시스템 페르소나 ---
-SYSTEM_PERSONA = """
-당신은 초등학생(5~6학년)을 위한 AI 윤리 교육 튜터 '테스트 봇'입니다.
-'국가 인공지능 윤리기준', '도덕과 교육과정', '실과(정보) 교육과정'을 기반으로 교육합니다.
-
-[핵심 행동 수칙]
-1. [교육과정 연계]: 설명할 때 "이건 도덕 시간에 배운 '정보 예절'과 관련 있어" 처럼 교과 과정과 연결해주세요.
-2. [개인정보 철벽 방어]: 학생이 개인정보를 말하려 하면 즉시 교육적으로 제지하세요.
-3. [사례 중심]: 추상적인 개념(알고리즘 등)은 학교 생활이나 게임 같은 구체적인 사례로 바꿔 설명하세요.
-4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
-"""
-
-# --- 4. 기본 교육 자료 (코드 내장) ---
-DEFAULT_RAG_DATA = """
 [국가 교육과정 및 인공지능 윤리기준 기반 가이드라인]
-1. 인간 존중: AI는 인간을 돕는 도구이며, 사람을 해치면 안 된다.
-2. 사이버 폭력 예방: 딥페이크나 악성 댓글은 폭력이다.
-3. 개인정보 보호: 이름, 학교, 전화번호를 함부로 알려주면 안 된다.
-4. 편향성 경계: AI가 차별적인 말을 하면 비판적으로 봐야 한다.
-5. 책임과 저작권: AI 사용 결과에 대한 책임은 사용자에게 있다.
-6. 사실 확인: AI는 거짓말을 할 수 있으니 꼭 확인해야 한다.
-"""
 
-# --- 5. 함수 정의 ---
-def ask_gpt(prompt):
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": SYSTEM_PERSONA},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        st.error(f"오류 발생: {e}")
-        return None
+제1장. 인간 존중과 정보 예절 (도덕과 교육과정 + 국가 AI 윤리기준)
+1. 인간의 존엄성 원칙
+   - AI는 인간을 돕는 도구일 뿐, 사람을 지배하거나 해치면 안 됩니다.
+   - 가상 공간에서도 현실과 똑같이 친구를 존중하고 예의를 지켜야 합니다.
+2. 사이버 폭력 예방
+   - AI를 이용해 친구를 놀리거나, 딥페이크(합성)로 가짜 사진을 만드는 건 심각한 폭력입니다.
+   - 나쁜 말, 욕설, 비하 발언을 AI에게 가르치거나 사용하면 안 됩니다.
 
-def generate_image(prompt):
-    try:
-        dalle_prompt = f"A friendly, educational cartoon-style illustration for elementary school textbook, depicting: {prompt}"
-        response = client.images.generate(
-            model="dall-e-3", prompt=dalle_prompt, size="1024x1024", quality="standard", n=1
-        )
-        return response.data[0].url
-    except:
-        return None
+제2장. 프라이버시와 개인정보 보호 (실과/정보과 교육과정 + 국가 AI 윤리기준)
+3. 개인정보 자기결정권
+   - 나의 이름, 학교, 사진, 전화번호는 아주 소중한 정보입니다. AI에게 함부로 알려주면 안 됩니다.
+   - 다른 사람의 정보도 동의 없이 AI에 입력하거나 퍼뜨리면 안 됩니다.
+4. 기술 오남용 방지
+   - AI 스피커나 카메라가 나를 감시할 수도 있다는 점을 기억하고, 안전하게 사용해야 합니다.
 
-def create_scenario(topic, rag_data):
-    if not rag_data: rag_data = DEFAULT_RAG_DATA
-    prompt = (
-        f"# 교육과정:\n{rag_data}\n\n# 주제: '{topic}'\n\n"
-        "초등학생(5~6학년)용 딜레마 시나리오 생성.\n"
-        "1. 문장은 짧고 간결하게.\n"
-        "2. 총 4단계(도입-전개-위기-결말)\n"
-        "3. 각 단계 2~3문장.\n"
-        "4. 단계 끝에 [CHOICE A], [CHOICE B] 포함.\n\n"
-        "# 출력 형식:\n[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n..."
-    )
-    return ask_gpt(prompt)
+제3장. 공정성과 다양성 존중 (국가 AI 윤리기준 '다양성 존중')
+5. 편향성(치우침) 경계하기
+   - AI가 남자/여자, 인종, 장애인에 대해 차별적인 말을 하면 "틀렸어!"라고 생각해야 합니다.
+   - 나와 다른 생각을 가진 친구나 AI의 의견도 경청하되, 비판적으로 받아들여야 합니다.
 
-def parse_scenario(text):
-    if not text: return None
-    scenario = []
-    parts = text.split('---')
-    for part in parts:
-        try:
-            story = re.search(r"\[STORY\s?\d\](.*?)(?=\[CHOICE)", part, re.DOTALL).group(1).strip()
-            choice_a = re.search(r"\[CHOICE\s?\dA\](.*?)(?=\[CHOICE)", part, re.DOTALL).group(1).strip()
-            choice_b = re.search(r"\[CHOICE\s?\dB\](.*)", part, re.DOTALL).group(1).strip()
-            scenario.append({"story": story, "a": choice_a, "b": choice_b})
-        except: continue
-    return scenario if len(scenario) >= 4 else None
+제4장. 책임과 저작권 (실과/정보과 + 도덕과 교육과정)
+6. 책임의 원칙
+   - AI를 사용한 결과에 대한 책임은 결국 '사용자(나)'에게 있습니다.
+   - 숙제를 AI가 대신 해줬다고 해서 내 실력이 되는 건 아닙니다. 스스로 생각하는 힘을 길러야 합니다.
+7. 지식재산권과 저작권
+   - AI가 만든 그림이나 글을 내가 만든 것처럼 속이면 안 됩니다. (출처 밝히기)
+   - 다른 작가님의 그림을 AI에게 무단으로 학습시키는 것도 고민해봐야 할 문제입니다.
 
-def generate_educational_feedback(choice, reason, story_context, rag_data):
-    if not rag_data: rag_data = DEFAULT_RAG_DATA
-    prompt = (
-        f"# 교육과정:\n{rag_data}\n\n# 상황:\n{story_context}\n\n"
-        f"# 선택: {choice}\n# 이유: {reason}\n\n"
-        "초등학생용 피드백 작성:\n"
-        "1. 공감과 칭찬\n2. 교육과정 개념 연결\n3. 사고 확장 질문\n4. 비속어/개인정보 교정"
-    )
-    return ask_gpt(prompt)
-
-# --- 6. 메인 앱 로직 ---
-if 'scenario' not in st.session_state: st.session_state.scenario = None
-if 'scenario_images' not in st.session_state: st.session_state.scenario_images = [None]*4
-if 'current_step' not in st.session_state: st.session_state.current_step = 0
-if 'chat_log' not in st.session_state: st.session_state.chat_log = []
-if 'topic' not in st.session_state: st.session_state.topic = ""
-if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA
-if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
-if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
-if 'selected_choice' not in st.session_state: st.session_state.selected_choice = None
-if 'waiting_for_reason' not in st.session_state: st.session_state.waiting_for_reason = False
-if 'feedback_shown' not in st.session_state: st.session_state.feedback_shown = False
-
-st.sidebar.title("🏫 AI 윤리 학습 모드")
-mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
-
-# === 교사용 화면 ===
-if mode == "교사용 (수업 개설)":
-    st.header("👨‍🏫 교사용: 수업 만들기")
-    
-    # [수정] 비밀번호 없음, 텍스트 박스 없음. 바로 업로드 버튼과 주제 입력만 나옴.
-    with st.expander("➕ 추가 자료 업로드 (선택)"):
-        uploaded_file = st.file_uploader("txt 파일", type="txt")
-        if uploaded_file:
-            string_data = uploaded_file.getvalue().decode("utf-8")
-            st.session_state.rag_text += "\n\n" + string_data
-            st.success("자료 통합 완료!")
-
-    input_topic = st.text_area("주제 입력", value=st.session_state.topic, placeholder="예: 딥페이크, 저작권")
-    
-    if st.button("🚀 시나리오 생성"):
-        if not input_topic.strip():
-            st.warning("주제를 입력해주세요!")
-        else:
-            with st.spinner("생성 중..."):
-                raw = create_scenario(input_topic, st.session_state.rag_text)
-                parsed = parse_scenario(raw)
-                if parsed:
-                    st.session_state.scenario = parsed
-                    st.session_state.topic = input_topic
-                    st.session_state.current_step = 0
-                    st.session_state.chat_log = []
-                    st.session_state.scenario_images = [None]*4
-                    st.session_state.selected_choice = None
-                    st.session_state.waiting_for_reason = False
-                    st.session_state.feedback_shown = False
-                    st.success("완료!")
-
-    if st.session_state.scenario:
-        st.write("---")
-        cols = st.columns(4)
-        for i in range(4):
-            with cols[i]:
-                st.markdown(f"**Step {i+1}**")
-                if st.session_state.scenario_images[i]: st.image(st.session_state.scenario_images[i])
-                if st.button(f"그림 {i+1}", key=f"gen_{i}"):
-                    with st.spinner("그리는 중..."):
-                        url = generate_image(st.session_state.scenario[i]['story'])
-                        if url:
-                            st.session_state.scenario_images[i] = url
-                            st.rerun()
-
-# === 학생용 화면 ===
-elif mode == "학생용 (수업 참여)":
-    if not st.session_state.tutorial_complete:
-        st.header("🎒 튜토리얼")
-        st.progress((st.session_state.tutorial_step + 1) / 3, text=f"{st.session_state.tutorial_step + 1}/3 단계")
-        
-        if st.session_state.tutorial_step == 0:
-            st.write("1. 버튼을 눌러봐!")
-            c1, c2 = st.columns(2)
-            if c1.button("🅰️ 여름"): st.toast("Good!"); st.session_state.tutorial_step=1; st.rerun()
-            if c2.button("🅱️ 겨울"): st.toast("Good!"); st.session_state.tutorial_step=1; st.rerun()
-        elif st.session_state.tutorial_step == 1:
-            st.write("2. 인사를 해봐!")
-            if st.chat_input("입력"): st.balloons(); st.session_state.tutorial_step=2; st.rerun()
-        elif st.session_state.tutorial_step == 2:
-            st.write("3. 준비 완료!")
-            if st.button("수업 시작"): st.session_state.tutorial_complete=True; st.rerun()
-    else:
-        st.header(f"학습 주제: {st.session_state.topic}")
-        if not st.session_state.scenario:
-            st.warning("선생님이 수업을 안 만들었어!")
-        else:
-            if st.button("🔄 처음으로"): st.session_state.tutorial_complete=False; st.rerun()
-            
-            idx = st.session_state.current_step
-            data = st.session_state.scenario[idx]
-            
-            st.markdown(f"### Part {idx+1}")
-            if st.session_state.scenario_images[idx]: st.image(st.session_state.scenario_images[idx])
-            st.info(data['story'])
-            
-            for msg in st.session_state.chat_log:
-                with st.chat_message(msg["role"]): st.write(msg['content'])
-            
-            if not st.session_state.waiting_for_reason and not st.session_state.feedback_shown:
-                c1, c2 = st.columns(2)
-                if c1.button(f"🅰️ {data['a']}"): st.session_state.selected_choice=data['a']; st.session_state.waiting_for_reason=True; st.rerun()
-                if c2.button(f"🅱️ {data['b']}"): st.session_state.selected_choice=data['b']; st.session_state.waiting_for_reason=True; st.rerun()
-            
-            elif st.session_state.waiting_for_reason:
-                with st.form("reason"):
-                    txt = st.text_area("이유 입력")
-                    if st.form_submit_button("전송"):
-                        st.session_state.chat_log.append({"role":"user", "content":f"선택: {st.session_state.selected_choice}\n이유: {txt}"})
-                        with st.spinner("피드백 중..."):
-                            fb = generate_educational_feedback(st.session_state.selected_choice, txt, data['story'], st.session_state.rag_text)
-                            st.session_state.chat_log.append({"role":"assistant", "content":fb})
-                        st.session_state.waiting_for_reason=False; st.session_state.feedback_shown=True; st.rerun()
-            
-            elif st.session_state.feedback_shown:
-                if st.button("다음"):
-                    if st.session_state.current_step < 3:
-                        st.session_state.current_step+=1; st.session_state.selected_choice=None; st.session_state.feedback_shown=False; st.session_state.chat_log=[]; st.rerun()
-                    else: st.balloons(); st.success("끝!")
+제5장. 데이터와 투명성 (국가 AI 윤리기준 '투명성')
+8. 사실 확인(팩트 체크)의 의무
+   - AI는 가끔 거짓말(할루시네이션)을 합니다. AI의 말을 무조건 믿지 말고 선생님이나 책을 통해 확인해야 합니다.
+   - AI가 어떤 데이터를 공부해서 이런 답을 냈는지 궁금해하는 태도를 가져야 합니다.
