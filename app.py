@@ -123,7 +123,6 @@ def analyze_scenario(topic, parsed_scenario, rag_data=""):
     
     result = {}
     try:
-        # 글자 수 제한 없이 추출
         def safe_extract(pattern, text):
             match = re.search(pattern, text, re.DOTALL)
             return match.group(1).strip() if match else '분석 실패 (AI 응답 형식 오류)'
@@ -154,7 +153,6 @@ def parse_scenario(json_data):
     
     for item in json_data['scenario']:
         # 필수 키가 모두 있는지 확인 (KeyError 방지)
-        # JSON 응답에서 키 이름을 'story', 'choice_a', 'choice_b'로 명시적으로 요청했으므로, get() 사용
         if item.get('story') and item.get('choice_a') and item.get('choice_b'):
             scenario_list.append({
                 "story": item['story'].strip(),
@@ -254,7 +252,7 @@ if mode == "교사용 (수업 개설)":
              st.session_state.rag_text = DEFAULT_RAG_DATA # 기본 RAG 데이터 유지 (빈 값)
         
     input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 사이의 시나리오를 창작하고 스스로 학습 목표를 분석합니다. (RAG는 비활성화된 상태입니다.)")
+    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 사이의 시나리오를 창작하고 스스로 학습 목표를 분석합니다.")
     
     if st.button("🚀 교육 시나리오 생성 (AI 단계 자율 결정)"):
         if not input_topic.strip():
@@ -286,7 +284,6 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.lesson_complete = False
                     
                     with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
-                        # RAG가 비어있더라도 인자로 전달
                         analysis = analyze_scenario(input_topic, st.session_state.scenario, st.session_state.rag_text) 
                         st.session_state.scenario_analysis = analysis
                     
@@ -295,23 +292,24 @@ if mode == "교사용 (수업 개설)":
                     st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않아 3단계 미만으로 생성되었습니다. 다시 시도해 주세요.")
 
 
-    # 분석 결과 요약 칸 (세로 배열로 수정)
+    # 분석 결과 요약 칸 (세로 배열, 마크다운 제거)
     if st.session_state.scenario and st.session_state.scenario_analysis:
         st.write("---")
         st.subheader(f"📊 AI가 분석한 학습 목표 (총 {st.session_state.total_steps}단계)")
         
         analysis = st.session_state.scenario_analysis
         
+        # 굵은 별표(**) 제거 및 글자가 잘리지 않도록 스타일 수정
         st.markdown(f"""
-        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px;'>
+        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px; font-size: 1.1em;'>
             **1. 근거 윤리 기준 (AI 주장)**: 
             <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['ethical_standard']}</p>
         </div>
-        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px;'>
+        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px; font-size: 1.1em;'>
             **2. 연계 성취기준 (AI 주장)**: 
             <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['achievement_std']}</p>
         </div>
-        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px;'>
+        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; font-size: 1.1em;'>
             **3. 주요 학습 내용**: 
             <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['learning_content']}</p>
         </div>
