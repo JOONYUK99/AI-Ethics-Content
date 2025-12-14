@@ -46,7 +46,7 @@ def ask_gpt_json(prompt, max_tokens=2048):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        st.error(f"오류 발생: {e}")
+        st.error(f"GPT-4o JSON 요청 오류: {e}")
         return None
 
 def ask_gpt_text(prompt):
@@ -62,7 +62,7 @@ def ask_gpt_text(prompt):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        st.error(f"오류 발생: {e}")
+        st.error(f"GPT-4o 텍스트 요청 오류: {e}")
         return None
 
 def generate_image(prompt):
@@ -87,7 +87,7 @@ def create_scenario(topic, rag_data=""):
         "\n"
         "# 출력 형식 (JSON): \n"
         "{\"scenario\": [\n"
-        "  {\"story\": \"1단계 스토리\", \"choice_a\": \"선택지 A\", \"choice_b\": \"선택지 B\"},\n"
+        "  {\"story\": \"1단계 스토리 내용\", \"choice_a\": \"선택지 A 내용\", \"choice_b\": \"선택지 B 내용\"},\n"
         "  ...\n"
         "]}"
     )
@@ -98,14 +98,14 @@ def create_scenario(topic, rag_data=""):
         try:
             return json.loads(raw_json)
         except json.JSONDecodeError:
-            st.error("JSON 파싱 오류: AI가 유효하지 않은 JSON을 반환했습니다.")
+            st.error("JSON 파싱 오류: AI가 유효하지 않은 JSON을 반환했습니다. 텍스트 형식 불규칙 문제 해결을 위해 JSON을 강제했습니다. 다시 시도해 주세요.")
             return None
     return None
 
 def analyze_scenario(topic, parsed_scenario):
     """생성된 시나리오를 분석하여 3가지 항목 추출 (시나리오 텍스트 재구성)"""
     # 파싱된 JSON 데이터를 다시 텍스트로 구성하여 분석 프롬프트에 전달
-    story_context = "\n".join([f"[{i+1}단계] {item['story']} (선택지: {item['choice_a']}, {item['choice_b']})" 
+    story_context = "\n".join([f"[{i+1}단계] {item['story']} (선택지: {item['a']}, {item['b']})" 
                                for i, item in enumerate(parsed_scenario)])
 
     prompt = (
@@ -122,6 +122,7 @@ def analyze_scenario(topic, parsed_scenario):
     
     result = {}
     try:
+        # 글자 길이 제한 함수
         def truncate_metric(text):
             return text if len(text) <= 15 else text[:15] + "..."
             
@@ -261,10 +262,10 @@ if mode == "교사용 (수업 개설)":
             st.session_state.scenario_images = [] # 이미지 초기화
 
             with st.spinner("AI가 딜레마 시나리오를 창작 중입니다..."):
-                raw_json = create_scenario(input_topic, st.session_state.rag_text) # JSON 요청
+                raw_json_data = create_scenario(input_topic, st.session_state.rag_text) # JSON 요청
                 
-                if raw_json:
-                    parsed = parse_scenario(raw_json)
+                if raw_json_data:
+                    parsed = parse_scenario(raw_json_data)
                 else:
                     parsed = None
                 
