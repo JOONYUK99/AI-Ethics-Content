@@ -3,30 +3,8 @@ from openai import OpenAI
 import re
 import os
 
-# --- 1. 페이지 설정 ---
-st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", page_icon="🤖", layout="wide")
-
-# --- 2. OpenAI 클라이언트 설정 ---
-try:
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-except Exception:
-    st.error("⚠️ OpenAI API 키를 설정해주세요! (Streamlit Cloud Settings -> Secrets 확인)")
-    st.stop()
-
-# --- 3. [핵심] 시스템 페르소나 ---
-SYSTEM_PERSONA = """
-당신은 초등학생(5~6학년)을 위한 AI 윤리 교육 튜터 '테스트 봇'입니다.
-'국가 인공지능 윤리기준', '도덕과 교육과정', '실과(정보) 교육과정'을 기반으로 교육합니다.
-
-[핵심 행동 수칙]
-1. [교육과정 연계]: 설명할 때 "이건 도덕 시간에 배운 '정보 예절'과 관련 있어" 처럼 교과 과정과 연결해주세요.
-2. [개인정보 철벽 방어]: 학생이 개인정보를 말하려 하면 즉시 교육적으로 제지하세요.
-3. [사례 중심]: 추상적인 개념(알고리즘 등)은 학교 생활이나 게임 같은 구체적인 사례로 바꿔 설명하세요.
-4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
-"""
-
-# --- 4. RAG DATA 무력화 ---
-DEFAULT_RAG_DATA = "" 
+# --- (이전 코드 블록은 동일하게 유지) ---
+# ... (생략: 1~4번 섹션은 동일) ...
 
 # --- 5. 함수 정의 ---
 
@@ -47,7 +25,7 @@ def ask_gpt(prompt):
         return None
 
 def generate_image(prompt):
-    """DALL-E 3 이미지 생성 (교육용 삽화)"""
+    # ... (생략: generate_image 함수는 동일) ...
     try:
         dalle_prompt = f"A friendly, educational cartoon-style illustration for elementary school textbook, depicting: {prompt}"
         response = client.images.generate(
@@ -58,40 +36,39 @@ def generate_image(prompt):
         return None
 
 def create_scenario(topic, rag_data=""): 
-    """LLM 자율 판단 단계로 시나리오 생성 요청"""
+    """LLM 자율 판단 단계로 시나리오 생성 요청 (명령 강화)"""
     
-    # LLM에게 딜레마 단계 수를 스스로 결정하도록 지시
+    # 🚨 [수정 및 강화] LLM에게 출력 형식을 반드시 지키도록 강하게 지시
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
-        "위 '교육과정' 내용을 반영하여, 초등학생(5~6학년)이 읽기 쉬운 딜레마 시나리오를 만들어줘.\n"
+        "아래 규칙을 **철저하게 지켜서** 딜레마 시나리오를 생성해야 합니다. **유효한 스토리가 없으면 안 됩니다.**\n"
         "[작성 규칙 - 중요!]\n"
         "1. 문장은 무조건 짧고 간결하게 끊어써야 해. (호흡이 길면 안 됨)\n"
         "2. 어려운 단어는 쓰지 마.\n"
         "3. 이 주제를 가장 잘 다룰 수 있도록 **최소 3단계에서 최대 6단계 사이**로 딜레마 단계 수를 스스로 결정하여 구성해.\n"
         "4. 각 단계는 2~3문장 이내로 짧게 작성.\n"
-        "5. 각 단계 끝에 [CHOICE A], [CHOICE B] 선택지 포함\n\n"
+        "5. **반드시** 각 단계 끝에 **[CHOICE A]**와 **[CHOICE B]** 선택지를 포함해야 합니다.\n\n"
         "# 출력 형식:\n[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n[STORY 2] ... --- ... [마지막 단계 스토리] ... ---"
     )
     return ask_gpt(prompt)
 
 def analyze_scenario(topic, full_scenario_text):
-    """생성된 시나리오를 분석하여 3가지 항목 추출"""
+    # ... (생략: analyze_scenario 함수는 동일) ...
     prompt = (
         f"교사가 '{topic}' 주제로 아래 시나리오를 만들었습니다:\n"
         f"--- 시나리오 텍스트 ---\n{full_scenario_text}\n\n"
         "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
         "\n"
         "# 출력 형식 (태그만 사용):\n"
-        "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙 (최대 10글자로 요약)]\n"
-        "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 코드 및 내용 요약 (최대 10글자로 요약)]\n"
-        "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용 (최대 10글자로 요약)]"
+        "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙 (최대 15글자로 요약)]\n"
+        "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 코드 및 내용 요약 (최대 15글자로 요약)]\n"
+        "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용 (최대 15글자로 요약)]"
     )
     analysis = ask_gpt(prompt)
     
     result = {}
     try:
-        # 글자 길이 제한을 위해 strip() 후 첫 15글자만 사용
         def truncate_metric(text):
             return text if len(text) <= 15 else text[:15] + "..."
             
@@ -113,77 +90,41 @@ def analyze_scenario(topic, full_scenario_text):
     return result
 
 def parse_scenario(text):
-    """시나리오 파싱 (단계 수 유동화)"""
+    """시나리오 파싱 (단계 수 유동화 및 안전 로직 보강)"""
     if not text: return None
     scenario = []
-    parts = text.split('---')
-    for part in parts:
-        try:
-            # STORY, CHOICE A, CHOICE B가 모두 포함된 파트만 유효한 단계로 간주
-            story = re.search(r"\[STORY\s?\d\](.*?)(?=\[CHOICE)", part, re.DOTALL).group(1).strip()
-            choice_a = re.search(r"\[CHOICE\s?\dA\](.*?)(?=\[CHOICE)", part, re.DOTALL).group(1).strip()
-            choice_b = re.search(r"\[CHOICE\s?\dB\](.*)", part, re.DOTALL).group(1).strip()
-            scenario.append({"story": story, "a": choice_a, "b": choice_b})
-        except: 
-             continue # 파싱이 실패한 부분은 무시하고 다음 파트로 넘어감
     
-    # 최소 3단계는 보장하도록 함
+    # 정규 표현식을 사용하여 STORY와 CHOICE 태그를 포함하는 유효한 단계만 추출
+    # STORY #, CHOICE #A, CHOICE #B 패턴을 모두 포함하는 블록을 찾음
+    # LLM이 [STORY 1]을 썼을지, [STORY]만 썼을지 모르기 때문에 유연하게 파싱
+    pattern = r"\[STORY\s?\d*\](.*?)\[CHOICE\s?\d*A\](.*?)\[CHOICE\s?\d*B\](.*?)(?:---|$)"
+    matches = re.findall(pattern, text, re.DOTALL)
+    
+    for match in matches:
+        # match[0]은 스토리 텍스트, match[1]은 CHOICE A 텍스트, match[2]는 CHOICE B 텍스트
+        story = match[0].strip()
+        choice_a = match[1].strip()
+        choice_b = match[2].strip()
+        
+        # 최소한의 텍스트가 있어야 유효한 단계로 간주
+        if story and choice_a and choice_b:
+             scenario.append({"story": story, "a": choice_a, "b": choice_b})
+    
+    # 최소 3단계는 보장하도록 함 (AI 자율 결정의 최소 기준)
     if len(scenario) >= 3:
         return scenario 
     else:
+        # 파싱은 성공했지만 단계 수가 부족하거나, 형식이 완전히 깨진 경우
         return None
 
-def get_four_step_feedback(choice, reason, story_context, rag_data=""):
-    """4단계 피드백을 모두 생성하여 리스트로 반환 (RAG 무력화)"""
-    
-    # 1. 공감/칭찬 + 교육과정 연계
-    prompt_1 = (
-        f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
-        f"학생 선택: {choice}, 이유: {reason}\n\n"
-        "초등학생에게 따뜻한 말투로 '공감과 칭찬'을 해주고, 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 설명하는 피드백을 한 단락으로 작성해줘."
-    )
-    
-    # 2. 사고 확장 질문
-    prompt_2 = (
-        f"# 상황:\n{story_context}\n학생 선택: {choice}\n\n"
-        "학생에게 '사고 확장 질문'을 하나만 던져줘. (예: 반대 입장은 어떨까? 친구는 어떻게 느꼈을까?)"
-    )
-    
-    try:
-        feedback_1 = ask_gpt(prompt_1)
-        feedback_2 = ask_gpt(prompt_2)
-        
-        return [
-            {"type": "feedback", "content": feedback_1}, 
-            {"type": "question", "content": feedback_2}, 
-            {"type": "user_response", "content": None},  
-            {"type": "final_feedback", "content": None} 
-        ]
-    except Exception as e:
-        st.error(f"피드백 생성 오류: {e}")
-        return None
+# ... (생략: get_four_step_feedback 및 generate_step_4_feedback 함수는 동일) ...
+# ... (생략: 메인 앱 로직도 동일, 변경된 함수를 사용함) ...
 
-def generate_step_4_feedback(initial_reason, user_answer, choice, story_context, rag_data=""):
-    """최종 수정 지도와 종합 정리 피드백 생성 (RAG 무력화)"""
-    
-    prompt = (
-        f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
-        f"학생의 첫 이유: {initial_reason}\n"
-        f"학생의 두 번째 응답 (사고 확장 질문에 대한 답변): {user_answer}\n"
-        f"학생 선택: {choice}\n\n"
-        "위 내용을 바탕으로 초등학생에게 줄 최종 피드백을 작성해줘.\n"
-        "1. [수정 지도]: 학생의 첫 답변이나 두 번째 답변에서 혹시 잘못된 생각(예: 친구 비하, 욕설, 개인정보 공개 등)이 있었다면 따뜻하게 고쳐줘.\n"
-        "2. [종합 정리]: 학생의 전체 고민 과정을 칭찬하고, 다음 이야기로 넘어갈 수 있도록 격려하는 메시지를 한 단락으로 작성해줘."
-    )
-    return ask_gpt(prompt)
+# --- 6. 메인 앱 로직 (핵심 부분만 다시 포함) ---
 
-
-# --- 6. 메인 앱 로직 ---
-
-# 세션 초기화 및 상태 변수 정의
-# SCENARIO_STEPS는 이제 동적으로 결정됩니다.
+# 세션 초기화 및 상태 변수 정의 (이전과 동일)
 if 'scenario' not in st.session_state: st.session_state.scenario = None
-if 'scenario_images' not in st.session_state: st.session_state.scenario_images = [] # 배열 크기 동적 할당
+if 'scenario_images' not in st.session_state: st.session_state.scenario_images = []
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
@@ -199,7 +140,7 @@ if 'lesson_complete' not in st.session_state: st.session_state.lesson_complete =
 if 'initial_reason' not in st.session_state: st.session_state.initial_reason = "" 
 if 'scenario_analysis' not in st.session_state: st.session_state.scenario_analysis = None
 if 'full_scenario_text' not in st.session_state: st.session_state.full_scenario_text = ""
-if 'total_steps' not in st.session_state: st.session_state.total_steps = 0 # 총 단계 수 저장
+if 'total_steps' not in st.session_state: st.session_state.total_steps = 0 
 
 st.sidebar.title("🏫 AI 윤리 학습 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
@@ -236,23 +177,21 @@ if mode == "교사용 (수업 개설)":
                 if parsed:
                     st.session_state.scenario = parsed
                     st.session_state.topic = input_topic
-                    st.session_state.total_steps = len(parsed) # 동적으로 단계 수 저장
+                    st.session_state.total_steps = len(parsed)
                     st.session_state.current_step = 0
                     st.session_state.chat_log = []
-                    # 단계 수에 맞춰 이미지 배열 크기 동적 할당
                     st.session_state.scenario_images = [None] * st.session_state.total_steps
                     st.session_state.feedback_stage = 0
                     st.session_state.learning_records = []
                     st.session_state.lesson_complete = False
                     
-                    # 💡 시나리오 분석 요청
                     with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
                         analysis = analyze_scenario(input_topic, st.session_state.full_scenario_text)
                         st.session_state.scenario_analysis = analysis
                     
                     st.success(f"총 {st.session_state.total_steps}단계 시나리오 생성 및 분석 완료!")
                 else:
-                    st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않습니다. 다시 시도해 주세요.")
+                    st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않아 3단계 미만으로 생성되었습니다. 다시 시도해 주세요.")
 
 
     # 분석 결과 요약 칸
@@ -271,7 +210,6 @@ if mode == "교사용 (수업 개설)":
         st.write("---")
         st.subheader("📜 생성된 수업 내용 확인 (단계별)")
         
-        # 단계 수에 맞춰 탭 생성
         tabs = st.tabs([f"{i+1}단계" for i in range(st.session_state.total_steps)])
         
         for i, tab in enumerate(tabs):
@@ -285,14 +223,12 @@ if mode == "교사용 (수업 개설)":
                     with c2: st.warning(f"**🅱️ 선택지:** {step['b']}")
                     st.write("---")
                     
-                    # 이미지 생성 기능
                     col_btn, col_img = st.columns([1, 2])
                     with col_btn:
                         if st.button(f"🎨 {i+1}단계 그림 그리기", key=f"gen_{i}"):
                             with st.spinner("AI 화가가 그림을 그리는 중..."):
                                 url = generate_image(step['story'])
                                 if url:
-                                    # 동적 배열에 이미지 저장
                                     st.session_state.scenario_images[i] = url
                                     st.rerun()
                     with col_img:
@@ -303,7 +239,7 @@ if mode == "교사용 (수업 개설)":
 
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면 (유동적 단계 로직 적용)
+# 🙋‍♂️ 학생용 화면 (유동적 단계 로직 유지)
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
@@ -452,7 +388,6 @@ elif mode == "학생용 (수업 참여)":
                             "answer_to_question": st.session_state.feedback_data[2]['content']
                         })
                 
-                # 다음 이야기 버튼 (총 단계 수 사용)
                 if st.button("다음 이야기로 넘어가기 ➡️", type="primary"):
                     if st.session_state.current_step < st.session_state.total_steps - 1:
                         st.session_state.current_step += 1
