@@ -26,7 +26,7 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. RAG DATA 무력화 ---
+# --- 4. RAG DATA 완전 제거 ---
 DEFAULT_RAG_DATA = "" 
 
 # --- 5. 함수 정의 ---
@@ -101,37 +101,41 @@ def create_scenario(topic, rag_data=""):
             return None
     return None
 
-def analyze_scenario(topic, parsed_scenario):
+def analyze_scenario(topic, parsed_scenario, rag_data=""):
     """생성된 시나리오를 분석하여 3가지 항목 추출"""
-    # Key Error 방지: parsed_scenario는 이미 유효한 리스트입니다.
-    story_context = "\n".join([f"[{i+1}단계] {item['story']} (선택지: {item['a']}, {item['b']})" 
+    
+    story_context = "\n".join([f"[{i+1}단계] {item.get('story', '스토리 없음')} (선택지: {item.get('a', 'A 없음')}, {item.get('b', 'B 없음')})" 
                                for i, item in enumerate(parsed_scenario)])
 
+    # 프롬프트에서 글자 수 제한 제거 (AI가 길게 대답할 수 있도록 허용)
     prompt = (
+        f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
         f"교사가 '{topic}' 주제로 아래 시나리오를 만들었습니다:\n"
         f"--- 시나리오 내용 ---\n{story_context}\n\n"
         "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
         "\n"
         "# 출력 형식 (태그만 사용):\n"
-        "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙 (최대 15글자로 요약)]\n"
-        "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 코드 및 내용 요약 (최대 15글자로 요약)]\n"
-        "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용 (최대 15글자로 요약)]"
+        "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙]\n"
+        "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 코드 및 내용 요약]\n"
+        "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용]"
     )
     analysis = ask_gpt_text(prompt)
     
     result = {}
     try:
-        def truncate_metric(text):
-            return text if len(text) <= 15 else text[:15] + "..."
+        # 글자 수 제한 없이 추출
+        def safe_extract(pattern, text):
+            match = re.search(pattern, text, re.DOTALL)
+            return match.group(1).strip() if match else '분석 실패 (AI 응답 형식 오류)'
             
-        ethical_standard = re.search(r"\[윤리 기준\](.*?)\[성취기준\]", analysis, re.DOTALL).group(1).strip()
-        achievement_std = re.search(r"\[성취기준\](.*?)\[학습 내용\]", analysis, re.DOTALL).group(1).strip()
-        learning_content = re.search(r"\[학습 내용\](.*)", analysis, re.DOTALL).group(1).strip()
+        ethical_standard = safe_extract(r"\[윤리 기준\](.*?)\[성취기준\]", analysis)
+        achievement_std = safe_extract(r"\[성취기준\](.*?)\[학습 내용\]", analysis)
+        learning_content = safe_extract(r"\[학습 내용\](.*)", analysis)
         
         result = {
-            'ethical_standard': truncate_metric(ethical_standard),
-            'achievement_std': truncate_metric(achievement_std),
-            'learning_content': truncate_metric(learning_content)
+            'ethical_standard': ethical_standard,
+            'achievement_std': achievement_std,
+            'learning_content': learning_content
         }
     except:
         result = {
@@ -150,13 +154,13 @@ def parse_scenario(json_data):
     
     for item in json_data['scenario']:
         # 필수 키가 모두 있는지 확인 (KeyError 방지)
+        # JSON 응답에서 키 이름을 'story', 'choice_a', 'choice_b'로 명시적으로 요청했으므로, get() 사용
         if item.get('story') and item.get('choice_a') and item.get('choice_b'):
             scenario_list.append({
                 "story": item['story'].strip(),
                 "a": item['choice_a'].strip(),
                 "b": item['choice_b'].strip()
             })
-        # 키가 부족하면 해당 아이템은 무시
     
     # 최소 3단계는 보장하도록 함
     if len(scenario_list) >= 3:
@@ -165,7 +169,7 @@ def parse_scenario(json_data):
         return None
 
 def get_four_step_feedback(choice, reason, story_context, rag_data=""):
-    """4단계 피드백을 모두 생성하여 리스트로 반환 (RAG 무력화)"""
+    """4단계 피드백을 모두 생성하여 리스트로 반환"""
     
     prompt_1 = (
         f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
@@ -193,7 +197,7 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
         return None
 
 def generate_step_4_feedback(initial_reason, user_answer, choice, story_context, rag_data=""):
-    """최종 수정 지도와 종합 정리 피드백 생성 (RAG 무력화)"""
+    """최종 수정 지도와 종합 정리 피드백 생성"""
     
     prompt = (
         f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
@@ -242,13 +246,15 @@ if mode == "교사용 (수업 개설)":
         uploaded_file = st.file_uploader("txt 파일 업로드", type=["txt", "pdf"])
         if uploaded_file and uploaded_file.type == 'text/plain':
             string_data = uploaded_file.getvalue().decode("utf-8")
-            st.session_state.rag_text = string_data
+            st.session_state.rag_text = DEFAULT_RAG_DATA + "\n\n[추가 자료]\n" + string_data
             st.success("✅ 외부 자료 업로드 완료 (AI가 자율 분석에 사용)")
         elif uploaded_file and uploaded_file.type == 'application/pdf':
             st.warning("PDF는 텍스트로 자동 변환되지 않아 AI 학습에 활용될 수 없습니다.")
+        else:
+             st.session_state.rag_text = DEFAULT_RAG_DATA # 기본 RAG 데이터 유지 (빈 값)
         
     input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 사이의 시나리오를 창작하고 스스로 학습 목표를 분석합니다.")
+    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 사이의 시나리오를 창작하고 스스로 학습 목표를 분석합니다. (RAG는 비활성화된 상태입니다.)")
     
     if st.button("🚀 교육 시나리오 생성 (AI 단계 자율 결정)"):
         if not input_topic.strip():
@@ -280,7 +286,8 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.lesson_complete = False
                     
                     with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
-                        analysis = analyze_scenario(input_topic, st.session_state.scenario)
+                        # RAG가 비어있더라도 인자로 전달
+                        analysis = analyze_scenario(input_topic, st.session_state.scenario, st.session_state.rag_text) 
                         st.session_state.scenario_analysis = analysis
                     
                     st.success(f"총 {st.session_state.total_steps}단계 시나리오 생성 및 분석 완료!")
@@ -293,18 +300,20 @@ if mode == "교사용 (수업 개설)":
         st.write("---")
         st.subheader(f"📊 AI가 분석한 학습 목표 (총 {st.session_state.total_steps}단계)")
         
-        # 세로 배열로 변경하여 가시성 및 안정성 확보
         analysis = st.session_state.scenario_analysis
         
         st.markdown(f"""
-        <div style='border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;'>
-            **1. 근거 윤리 기준 (AI 주장)**: {analysis['ethical_standard']}
+        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px;'>
+            **1. 근거 윤리 기준 (AI 주장)**: 
+            <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['ethical_standard']}</p>
         </div>
-        <div style='border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;'>
-            **2. 연계 성취기준 (AI 주장)**: {analysis['achievement_std']}
+        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px;'>
+            **2. 연계 성취기준 (AI 주장)**: 
+            <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['achievement_std']}</p>
         </div>
-        <div style='border: 1px solid #ccc; padding: 10px; border-radius: 5px;'>
-            **3. 주요 학습 내용**: {analysis['learning_content']}
+        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px;'>
+            **3. 주요 학습 내용**: 
+            <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['learning_content']}</p>
         </div>
         """, unsafe_allow_html=True)
 
