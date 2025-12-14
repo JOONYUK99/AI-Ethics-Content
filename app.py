@@ -26,8 +26,49 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. RAG DATA 완전 제거 ---
-DEFAULT_RAG_DATA = "" 
+# --- 4. RAG DATA 최종 통합 (형님께서 제공하신 자료 기반) ---
+DEFAULT_RAG_DATA = """
+[핵심 교육과정 및 AI 윤리 기준 (RAG 지식 베이스)]
+
+--- 1. AI 윤리 기준 및 주요 사례 분석 (표 P-19, 표 P-15 통합) ---
+
+[윤리 기준] 프라이버시 보호:
+- 근거: 초등학교 교사 대상 콘텐츠 요구 주제 중 가장 높음. AI 전 생애주기에 걸쳐 개인 정보 오용 최소화.
+- 사례: 대기업 사내 챗봇 기밀 유출 (2023).
+
+[윤리 기준] 연대성:
+- 근거: 초등학교 교사 대상 콘텐츠 요구 주제 중 두 번째. AI 전 주기에 걸쳐 다양한 주체들의 공정한 참여 기회 보장.
+- 학생 요구: 생성형 AI 소통 예절이 다양한 집단 간 관계 연대성과 연관.
+- 사례: 무인 AI 키오스크로 기기 어려움을 겪은 어르신들 (2023~현재).
+
+[윤리 기준] 데이터 관리:
+- 근거: 초등학교 교사 대상 콘텐츠 요구 주제 중 세 번째. 데이터 수집 및 활용 과정에서 데이터 편향성에 대한 위반 행위를 경계해야 함.
+- 학생 요구: 주 사용목적인 정보검색 및 취미활동과 연관.
+- 사례: 한국인 이미지 생성 편향성 (2023).
+
+[윤리 기준] 침해금지:
+- 근거: 초등학생 대상 요구 분석 시 AI의 올바른 활용 교육이 중요. AI를 인간에게 직접적인 해를 입히는 목적으로 활용해서는 안 됨.
+- 사례: 딥페이크 학교폭력 사태 (2024).
+
+[윤리 기준] 안전성:
+- 근거: AI 활용 과정에서 잠재적 위험(욕설) 발생 시, 사용자가 작동을 제어할 수 있는 기능을 갖추도록 노력해야 함과 관련.
+- 사례: AI 챗봇 이루다 혐오 발언 (2023).
+
+--- 2. 연계 성취기준 및 교육 목표 (성취기준 및 근거) ---
+
+[도덕과 성취기준]
+- [4도03-02]: 디지털 사회의 다양한 문제에 해결 방안을 탐구하는 윤리적 민감성 기르기.
+- [6도02-03]: 인간과 인공지능 로봇 간의 도덕에 기반을 둔 관계 형성의 필요성 (안전성의 잠재적 위험 방지 및 안전 보장 문맥과 연관).
+
+[실과(정보) 성취기준]
+- [6실05-02]: 개인정보 보호 및 인공지능의 올바른 사용법과 연관.
+- [6실05-03]: 실생활 문제 해결 프로그램 협력, 산출물 타인과 공유 같이 공익적인 목표에서 연대성과 연관.
+- [6실05-05]: 인공지능의 학습 원리를 이해하며 여기서 데이터의 중요성 및 관리 방안이 연관성 있음.
+- [6실05-01]: 컴퓨터 활용 생활 속 문제 해결 사례 탐색 및 알고리즘 표현이 침해금지의 부정적 결과에 대응 방안 마련과 연관.
+
+[핵심 목표]
+- 현대 과학기술과 관련된 윤리적 쟁점 분석을 통해 과학기술의 유용성과 한계를 인식하고, 활용에 관한 책임 의식을 길러야 함.
+"""
 
 # --- 5. 함수 정의 ---
 
@@ -80,10 +121,12 @@ def create_scenario(topic, rag_data=""):
     """LLM 자율 판단 단계로 시나리오 생성 요청 (JSON 형식 강제)"""
     
     prompt = (
-        f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
+        f"# 참고할 교육과정 및 윤리 기준 (RAG 지식 베이스):\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
-        "아래 규칙을 **철저하게 지켜서** 딜레마 시나리오를 생성해야 합니다. 최소 3단계에서 최대 6단계 사이로 단계 수를 스스로 결정해.\n"
-        "각 단계는 2~3문장 이내로 짧게 작성해야 해. 어려운 단어는 쓰지 마.\n"
+        "아래 규칙을 **철저하게 지켜서** 딜레마 시나리오를 생성해야 합니다.\n"
+        "규칙 1: 시나리오는 반드시 AI 윤리 기준이나 교육과정 성취기준과 관련된 **딜레마** 상황이어야 합니다. 참고 자료와 관련 없는 주제(예: 스포츠)가 들어오면, 최대한 관련 있는 AI 윤리 요소로 해석하여 시나리오를 구성합니다.\n"
+        "규칙 2: 최소 3단계에서 최대 6단계 사이로 단계 수를 스스로 결정해.\n"
+        "규칙 3: 각 단계는 2~3문장 이내로 짧게 작성해야 해. 어려운 단어는 쓰지 마.\n"
         "\n"
         "# 출력 형식 (JSON): \n"
         "{\"scenario\": [\n"
@@ -102,18 +145,18 @@ def create_scenario(topic, rag_data=""):
     return None
 
 def analyze_scenario(topic, parsed_scenario, rag_data=""):
-    """생성된 시나리오를 분석하여 3가지 항목 추출"""
+    """생성된 시나리오를 분석하여 3가지 항목 추출 (경고 문구 삽입)"""
     
-    # Key Error 방지: parsed_scenario의 각 아이템에서 안전하게 데이터를 추출하여 context 구성
     story_context = "\n".join([f"[{i+1}단계] {item.get('story', '스토리 없음')} (선택지: {item.get('a', 'A 없음')}, {item.get('b', 'B 없음')})" 
                                for i, item in enumerate(parsed_scenario)])
 
-    # 프롬프트에서 글자 수 제한 제거 (AI가 길게 대답할 수 있도록 허용)
+    # 🚨 [수정] 오정보(축구 등) 입력 시 경고 문구를 출력하도록 프롬프트 강화
     prompt = (
-        f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
+        f"# 참고할 교육과정 및 윤리 기준 (RAG 지식 베이스):\n{rag_data}\n\n" 
         f"교사가 '{topic}' 주제로 아래 시나리오를 만들었습니다:\n"
         f"--- 시나리오 내용 ---\n{story_context}\n\n"
         "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
+        "**가장 중요한 규칙:** 만약 입력 주제나 생성된 시나리오 내용이 제공된 RAG 지식 베이스의 AI 윤리 및 교육과정과 **전혀 관련이 없다고 판단**되면, **[윤리 기준] 항목에만 '윤리교육과 상관없는 내용입니다'라고 명시**하고, 나머지 항목은 AI가 자체적으로 교육적 해석을 하여 채우세요.\n"
         "\n"
         "# 출력 형식 (태그만 사용):\n"
         "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙]\n"
@@ -153,7 +196,7 @@ def parse_scenario(json_data):
     scenario_list = []
     
     for item in json_data['scenario']:
-        # 필수 키가 모두 있는지 확인 (KeyError 방지)
+        # 필수 키가 모두 있는지 안전하게 확인 (KeyError 방지)
         if item.get('story') and item.get('choice_a') and item.get('choice_b'):
             scenario_list.append({
                 "story": item['story'].strip(),
@@ -172,9 +215,9 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
     """4단계 피드백을 모두 생성하여 리스트로 반환"""
     
     prompt_1 = (
-        f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
+        f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생 선택: {choice}, 이유: {reason}\n\n"
-        "초등학생에게 따뜻한 말투로 '공감과 칭찬'을 해주고, 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 설명하는 피드백을 한 단락으로 작성해줘."
+        "초등학생에게 따뜻한 말투로 '공감과 칭찬'을 해주고, 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 설명하는 피드백을 한 단락으로 작성해줘. 이 답변에도 RAG 지식 베이스를 활용해야 해."
     )
     
     prompt_2 = (
@@ -200,7 +243,7 @@ def generate_step_4_feedback(initial_reason, user_answer, choice, story_context,
     """최종 수정 지도와 종합 정리 피드백 생성"""
     
     prompt = (
-        f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
+        f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생의 첫 이유: {initial_reason}\n"
         f"학생의 두 번째 응답 (사고 확장 질문에 대한 답변): {user_answer}\n"
         f"학생 선택: {choice}\n\n"
@@ -243,18 +286,10 @@ if mode == "교사용 (수업 개설)":
     st.header("👨‍🏫 교사용: 자율 분석 수업 만들기")
     
     with st.expander("➕ 외부 자료 업로드 (참고용)"):
-        uploaded_file = st.file_uploader("txt 파일 업로드", type=["txt", "pdf"])
-        if uploaded_file and uploaded_file.type == 'text/plain':
-            string_data = uploaded_file.getvalue().decode("utf-8")
-            st.session_state.rag_text = DEFAULT_RAG_DATA + "\n\n[추가 자료]\n" + string_data
-            st.success("✅ 외부 자료 업로드 완료 (AI가 자율 분석에 사용)")
-        elif uploaded_file and uploaded_file.type == 'application/pdf':
-            st.warning("PDF는 텍스트로 자동 변환되지 않아 AI 학습에 활용될 수 없습니다.")
-        else:
-             st.session_state.rag_text = DEFAULT_RAG_DATA # 기본 RAG 데이터 유지 (빈 값)
+        st.write("외부 자료 업로드 기능은 현재 AI 윤리 기준 테스트를 위해 기본값(형님이 제공하신 RAG 데이터)으로 유지됩니다.")
         
     input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 사이의 시나리오를 창작하고 스스로 학습 목표를 분석합니다.")
+    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 시나리오를 창작하고 스스로 학습 목표를 분석합니다. **'축구 토트넘'처럼 관련 없는 주제를 입력하여 경고 문구를 확인해보세요.**")
     
     if st.button("🚀 교육 시나리오 생성 (AI 단계 자율 결정)"):
         if not input_topic.strip():
@@ -267,7 +302,8 @@ if mode == "교사용 (수업 개설)":
             st.session_state.scenario_images = [] # 이미지 초기화
 
             with st.spinner("AI가 딜레마 시나리오를 창작 중입니다..."):
-                raw_json_data = create_scenario(input_topic, st.session_state.rag_text) # JSON 요청
+                # RAG 데이터와 함께 시나리오 생성 요청
+                raw_json_data = create_scenario(input_topic, st.session_state.rag_text) 
                 
                 if raw_json_data:
                     parsed = parse_scenario(raw_json_data)
@@ -286,7 +322,7 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.lesson_complete = False
                     
                     with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
-                        # RAG가 비어있더라도 인자로 전달
+                        # RAG 데이터와 함께 분석 요청 (오정보 시 경고 문구 유도)
                         analysis = analyze_scenario(input_topic, st.session_state.scenario, st.session_state.rag_text) 
                         st.session_state.scenario_analysis = analysis
                     
@@ -302,6 +338,7 @@ if mode == "교사용 (수업 개설)":
         
         analysis = st.session_state.scenario_analysis
         
+        # 굵은 별표(**) 마크다운 제거 완료
         st.markdown(f"""
         <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px; font-size: 1.1em;'>
             1. 근거 윤리 기준 (AI 주장): 
