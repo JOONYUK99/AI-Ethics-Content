@@ -59,7 +59,7 @@ def generate_image(prompt):
         return None
 
 def create_scenario(topic, rag_data=""): 
-    """6단계 시나리오 생성 요청 (RAG 무력화)"""
+    """6단계 시나리오 생성 요청"""
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
@@ -80,23 +80,29 @@ def analyze_scenario(topic, full_scenario_text):
         f"교사가 '{topic}' 주제로 아래 6단계 시나리오를 만들었습니다:\n"
         f"--- 시나리오 텍스트 ---\n{full_scenario_text}\n\n"
         "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
-        "(주의: RAG 데이터가 제공되지 않았으므로, 교육과정 내용은 AI의 자율적인 판단에 기반합니다.)\n"
         "\n"
         "# 출력 형식 (태그만 사용):\n"
-        "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙]\n"
-        "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 (예: 6실05-05 인공지능이 사회에 미치는 영향을 탐색한다.)]\n"
-        "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용 (최대 2줄)]"
+        "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙 (최대 10글자로 요약)]\n"
+        "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 코드 및 내용 요약 (최대 10글자로 요약)]\n"
+        "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용 (최대 10글자로 요약)]"
     )
     analysis = ask_gpt(prompt)
     
     result = {}
     try:
-        result['ethical_standard'] = re.search(r"\[윤리 기준\](.*?)\[성취기준\]", analysis, re.DOTALL).group(1).strip()
-        result['achievement_std'] = re.search(r"\[성취기준\](.*?)\[학습 내용\]", analysis, re.DOTALL).group(1).strip()
-        result['learning_content'] = re.search(r"\[학습 내용\](.*)", analysis, re.DOTALL).group(1).strip()
+        # 정규표현식은 그대로 유지하되, AI의 응답이 요약되도록 프롬프트를 수정했음
+        ethical_standard = re.search(r"\[윤리 기준\](.*?)\[성취기준\]", analysis, re.DOTALL).group(1).strip()
+        achievement_std = re.search(r"\[성취기준\](.*?)\[학습 내용\]", analysis, re.DOTALL).group(1).strip()
+        learning_content = re.search(r"\[학습 내용\](.*)", analysis, re.DOTALL).group(1).strip()
+        
+        result = {
+            'ethical_standard': ethical_standard,
+            'achievement_std': achievement_std,
+            'learning_content': learning_content
+        }
     except:
         result = {
-            'ethical_standard': '분석 실패 (AI가 태그를 정확히 따르지 않았습니다.)',
+            'ethical_standard': '분석 실패',
             'achievement_std': '분석 실패',
             'learning_content': '분석 실패'
         }
@@ -123,13 +129,13 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
     prompt_1 = (
         f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생 선택: {choice}, 이유: {reason}\n\n"
-        "초등학생에게 따뜻한 말투로 **'공감과 칭찬'**을 해주고, 선택한 이유가 교육과정 중 어떤 부분(**정보 예절, 개인정보 보호 등**)과 연결되는지 설명하는 피드백을 **한 단락**으로 작성해줘."
+        "초등학생에게 따뜻한 말투로 '공감과 칭찬'을 해주고, 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 설명하는 피드백을 한 단락으로 작성해줘."
     )
     
     # 2. 사고 확장 질문
     prompt_2 = (
         f"# 상황:\n{story_context}\n학생 선택: {choice}\n\n"
-        "학생에게 **'사고 확장 질문'**을 하나만 던져줘. (예: 반대 입장은 어떨까? 친구는 어떻게 느꼈을까?)"
+        "학생에게 '사고 확장 질문'을 하나만 던져줘. (예: 반대 입장은 어떨까? 친구는 어떻게 느꼈을까?)"
     )
     
     try:
@@ -137,8 +143,8 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
         feedback_2 = ask_gpt(prompt_2)
         
         return [
-            {"type": "feedback", "content": feedback_1}, # 1단계: 공감/칭찬 + 교육 연계
-            {"type": "question", "content": feedback_2}, # 2단계: 사고 확장 질문
+            {"type": "feedback", "content": feedback_1}, 
+            {"type": "question", "content": feedback_2}, 
             {"type": "user_response", "content": None},  
             {"type": "final_feedback", "content": None} 
         ]
@@ -156,7 +162,7 @@ def generate_step_4_feedback(initial_reason, user_answer, choice, story_context,
         f"학생 선택: {choice}\n\n"
         "위 내용을 바탕으로 초등학생에게 줄 최종 피드백을 작성해줘.\n"
         "1. [수정 지도]: 학생의 첫 답변이나 두 번째 답변에서 혹시 잘못된 생각(예: 친구 비하, 욕설, 개인정보 공개 등)이 있었다면 따뜻하게 고쳐줘.\n"
-        "2. [종합 정리]: 학생의 전체 고민 과정을 칭찬하고, 다음 이야기로 넘어갈 수 있도록 격려하는 메시지를 **한 단락**으로 작성해줘."
+        "2. [종합 정리]: 학생의 전체 고민 과정을 칭찬하고, 다음 이야기로 넘어갈 수 있도록 격려하는 메시지를 한 단락으로 작성해줘."
     )
     return ask_gpt(prompt)
 
@@ -179,28 +185,29 @@ if 'feedback_data' not in st.session_state: st.session_state.feedback_data = Non
 if 'learning_records' not in st.session_state: st.session_state.learning_records = []
 if 'lesson_complete' not in st.session_state: st.session_state.lesson_complete = False
 if 'initial_reason' not in st.session_state: st.session_state.initial_reason = "" 
-if 'scenario_analysis' not in st.session_state: st.session_state.scenario_analysis = None # 새 분석 결과 저장
+if 'scenario_analysis' not in st.session_state: st.session_state.scenario_analysis = None
+if 'full_scenario_text' not in st.session_state: st.session_state.full_scenario_text = ""
 
 st.sidebar.title("🏫 AI 윤리 학습 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
 
 # ==========================================
-# 👨‍🏫 교사용 화면 (분석 칸 추가)
+# 👨‍🏫 교사용 화면 (UI 정리 완료)
 # ==========================================
 if mode == "교사용 (수업 개설)":
-    st.header("👨‍🏫 교사용: 교육과정 기반 수업 만들기 (RAG 제거됨)")
+    st.header("👨‍🏫 교사용: 자율 분석 수업 만들기")
     
-    with st.expander("➕ 외부 자료 업로드 (RAG 테스트용 PDF 첨부 기능)"):
+    with st.expander("➕ 외부 자료 업로드 (참고용)"):
         uploaded_file = st.file_uploader("txt 파일 업로드", type=["txt", "pdf"])
         if uploaded_file and uploaded_file.type == 'text/plain':
             string_data = uploaded_file.getvalue().decode("utf-8")
             st.session_state.rag_text = string_data
-            st.success("✅ 외부 자료 업로드 완료 (AI의 지식 기반으로는 사용되지 않습니다)")
+            st.success("✅ 외부 자료 업로드 완료 (AI가 자율 분석에 사용)")
         elif uploaded_file and uploaded_file.type == 'application/pdf':
             st.warning("PDF는 텍스트로 자동 변환되지 않아 AI 학습에 활용될 수 없습니다.")
         
-    input_topic = st.text_area("오늘의 수업 주제 (AI에게 시나리오 창작을 요청할 주제)", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: RAG가 제거되어 AI는 순수하게 주제만으로 6단계 시나리오를 창작합니다. (할루시네이션 테스트 가능)")
+    input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
+    st.caption("💡 팁: AI가 주제만으로 6단계 시나리오를 창작하고, 스스로 학습 목표를 분석합니다.")
     
     if st.button("🚀 6단계 교육 시나리오 생성"):
         if not input_topic.strip():
@@ -209,7 +216,6 @@ if mode == "교사용 (수업 개설)":
             with st.spinner("AI가 6단계 딜레마 시나리오를 창작 중입니다..."):
                 raw = create_scenario(input_topic, st.session_state.rag_text)
                 
-                # 원본 텍스트 저장 (분석을 위해 필요)
                 st.session_state.full_scenario_text = raw 
                 
                 parsed = parse_scenario(raw)
@@ -223,30 +229,33 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.feedback_stage = 0
                     st.session_state.learning_records = []
                     st.session_state.lesson_complete = False
-                    st.success("RAG 제거된 6단계 시나리오 생성 완료! 분석 중입니다...")
                     
                     # 💡 시나리오 분석 요청
-                    with st.spinner("AI가 스스로 근거 윤리 기준을 분석 중입니다..."):
+                    with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
                         analysis = analyze_scenario(input_topic, st.session_state.full_scenario_text)
                         st.session_state.scenario_analysis = analysis
                     
-                    st.success("시나리오 분석 완료! 아래에서 확인하세요.")
+                    st.success("시나리오 생성 및 분석 완료!")
                 else:
                     st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않습니다. 다시 시도해 주세요.")
 
 
-    # [추가된 기능] 분석 결과 요약 칸
+    # [수정된 기능] 분석 결과 요약 칸
     if st.session_state.scenario and st.session_state.scenario_analysis:
         st.write("---")
-        st.subheader("📊 AI가 분석한 학습 목표 (할루시네이션 확인 영역)")
+        st.subheader("📊 AI가 분석한 학습 목표")
         
+        # UI 깨짐 방지를 위해 글자 수를 줄여 표시
+        def truncate_text(text):
+            return text if len(text) <= 15 else text[:15] + "..."
+
         cols = st.columns(3)
         with cols[0]:
-            st.metric("1. 근거 윤리 기준 (AI 주장)", st.session_state.scenario_analysis['ethical_standard'])
+            st.metric("1. 근거 윤리 기준 (AI 주장)", truncate_text(st.session_state.scenario_analysis['ethical_standard']))
         with cols[1]:
-            st.metric("2. 연계 성취기준 (AI 주장)", st.session_state.scenario_analysis['achievement_std'])
+            st.metric("2. 연계 성취기준 (AI 주장)", truncate_text(st.session_state.scenario_analysis['achievement_std']))
         with cols[2]:
-            st.metric("3. 주요 학습 내용", st.session_state.scenario_analysis['learning_content'])
+            st.metric("3. 주요 학습 내용", truncate_text(st.session_state.scenario_analysis['learning_content']))
 
         st.write("---")
         st.subheader(f"📜 생성된 수업 내용 확인 (총 {SCENARIO_STEPS}단계)")
@@ -289,7 +298,6 @@ elif mode == "학생용 (수업 참여)":
     # [A] 튜토리얼 (생략)
     if not st.session_state.tutorial_complete:
         st.header("🎒 연습 시간: 테스트 봇과 친해지기")
-        # ... (튜토리얼 로직은 위 코드와 동일하게 유지) ...
         st.progress((st.session_state.tutorial_step + 1) / 3, text=f"진행률: {st.session_state.tutorial_step + 1}/3 단계")
 
         if st.session_state.tutorial_step == 0:
@@ -380,7 +388,7 @@ elif mode == "학생용 (수업 참여)":
                                 )
                                 st.session_state.feedback_data = feedback_steps
                             
-                            st.session_state.feedback_stage = 2
+                            st.session_state.feedback_stage = 2 
                             st.rerun()
 
             elif st.session_state.feedback_stage == 2:
@@ -444,11 +452,11 @@ elif mode == "학생용 (수업 참여)":
                         st.session_state.lesson_complete = True
                         st.rerun()
 
-    # [C] 학습 완료 (최종 보고서 기능 제거)
+    # [C] 학습 완료 
     else:
         st.header("🎉 학습 완료! 참 잘했어!")
         st.markdown(f'<p style="font-size:1.2em;">오늘의 <b>{SCENARIO_STEPS}단계 윤리 학습</b>을 모두 마쳤어! 정말 훌륭해! </p>', unsafe_allow_html=True)
-        st.markdown('<p style="font-size:1.1em;">RAG 기능을 제거했기 때문에, AI가 어떤 내용을 만들어냈는지 잘 확인해봐. (할루시네이션 가능성이 높아요!)</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-size:1.1em;">AI가 생성한 학습 내용을 교사용 화면에서 다시 한번 확인해보세요.</p>', unsafe_allow_html=True)
         
         st.write("---")
         st.write("### 👣 학습 기록 요약 (임시)")
