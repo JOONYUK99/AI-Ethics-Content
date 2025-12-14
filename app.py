@@ -104,6 +104,7 @@ def create_scenario(topic, rag_data=""):
 def analyze_scenario(topic, parsed_scenario, rag_data=""):
     """생성된 시나리오를 분석하여 3가지 항목 추출"""
     
+    # Key Error 방지: parsed_scenario의 각 아이템에서 안전하게 데이터를 추출하여 context 구성
     story_context = "\n".join([f"[{i+1}단계] {item.get('story', '스토리 없음')} (선택지: {item.get('a', 'A 없음')}, {item.get('b', 'B 없음')})" 
                                for i, item in enumerate(parsed_scenario)])
 
@@ -159,6 +160,7 @@ def parse_scenario(json_data):
                 "a": item['choice_a'].strip(),
                 "b": item['choice_b'].strip()
             })
+        # 키가 부족하면 해당 아이템은 무시
     
     # 최소 3단계는 보장하도록 함
     if len(scenario_list) >= 3:
@@ -284,6 +286,7 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.lesson_complete = False
                     
                     with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
+                        # RAG가 비어있더라도 인자로 전달
                         analysis = analyze_scenario(input_topic, st.session_state.scenario, st.session_state.rag_text) 
                         st.session_state.scenario_analysis = analysis
                     
@@ -292,25 +295,24 @@ if mode == "교사용 (수업 개설)":
                     st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않아 3단계 미만으로 생성되었습니다. 다시 시도해 주세요.")
 
 
-    # 분석 결과 요약 칸 (세로 배열, 마크다운 제거)
+    # 분석 결과 요약 칸 (세로 배열, 마크다운 제거 완료)
     if st.session_state.scenario and st.session_state.scenario_analysis:
         st.write("---")
         st.subheader(f"📊 AI가 분석한 학습 목표 (총 {st.session_state.total_steps}단계)")
         
         analysis = st.session_state.scenario_analysis
         
-        # 굵은 별표(**) 제거 및 글자가 잘리지 않도록 스타일 수정
         st.markdown(f"""
         <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px; font-size: 1.1em;'>
-            **1. 근거 윤리 기준 (AI 주장)**: 
+            1. 근거 윤리 기준 (AI 주장): 
             <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['ethical_standard']}</p>
         </div>
         <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px; font-size: 1.1em;'>
-            **2. 연계 성취기준 (AI 주장)**: 
+            2. 연계 성취기준 (AI 주장): 
             <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['achievement_std']}</p>
         </div>
         <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; font-size: 1.1em;'>
-            **3. 주요 학습 내용**: 
+            3. 주요 학습 내용: 
             <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['learning_content']}</p>
         </div>
         """, unsafe_allow_html=True)
