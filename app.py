@@ -3,8 +3,30 @@ from openai import OpenAI
 import re
 import os
 
-# --- (이전 코드 블록은 동일하게 유지) ---
-# ... (생략: 1~4번 섹션은 동일) ...
+# --- 1. 페이지 설정 ---
+st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", page_icon="🤖", layout="wide")
+
+# --- 2. OpenAI 클라이언트 설정 ---
+try:
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+except Exception:
+    st.error("⚠️ OpenAI API 키를 설정해주세요! (Streamlit Cloud Settings -> Secrets 확인)")
+    st.stop()
+
+# --- 3. [핵심] 시스템 페르소나 ---
+SYSTEM_PERSONA = """
+당신은 초등학생(5~6학년)을 위한 AI 윤리 교육 튜터 '테스트 봇'입니다.
+'국가 인공지능 윤리기준', '도덕과 교육과정', '실과(정보) 교육과정'을 기반으로 교육합니다.
+
+[핵심 행동 수칙]
+1. [교육과정 연계]: 설명할 때 "이건 도덕 시간에 배운 '정보 예절'과 관련 있어" 처럼 교과 과정과 연결해주세요.
+2. [개인정보 철벽 방어]: 학생이 개인정보를 말하려 하면 즉시 교육적으로 제지하세요.
+3. [사례 중심]: 추상적인 개념(알고리즘 등)은 학교 생활이나 게임 같은 구체적인 사례로 바꿔 설명하세요.
+4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
+"""
+
+# --- 4. RAG DATA 무력화 ---
+DEFAULT_RAG_DATA = "" 
 
 # --- 5. 함수 정의 ---
 
@@ -25,7 +47,7 @@ def ask_gpt(prompt):
         return None
 
 def generate_image(prompt):
-    # ... (생략: generate_image 함수는 동일) ...
+    """DALL-E 3 이미지 생성 (교육용 삽화)"""
     try:
         dalle_prompt = f"A friendly, educational cartoon-style illustration for elementary school textbook, depicting: {prompt}"
         response = client.images.generate(
@@ -36,9 +58,9 @@ def generate_image(prompt):
         return None
 
 def create_scenario(topic, rag_data=""): 
-    """LLM 자율 판단 단계로 시나리오 생성 요청 (명령 강화)"""
+    """LLM 자율 판단 단계로 시나리오 생성 요청"""
     
-    # 🚨 [수정 및 강화] LLM에게 출력 형식을 반드시 지키도록 강하게 지시
+    # 🚨 [LLM 명령 강화] 출력 형식을 반드시 지키도록 강하게 지시
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
@@ -54,7 +76,7 @@ def create_scenario(topic, rag_data=""):
     return ask_gpt(prompt)
 
 def analyze_scenario(topic, full_scenario_text):
-    # ... (생략: analyze_scenario 함수는 동일) ...
+    """생성된 시나리오를 분석하여 3가지 항목 추출"""
     prompt = (
         f"교사가 '{topic}' 주제로 아래 시나리오를 만들었습니다:\n"
         f"--- 시나리오 텍스트 ---\n{full_scenario_text}\n\n"
@@ -94,9 +116,7 @@ def parse_scenario(text):
     if not text: return None
     scenario = []
     
-    # 정규 표현식을 사용하여 STORY와 CHOICE 태그를 포함하는 유효한 단계만 추출
-    # STORY #, CHOICE #A, CHOICE #B 패턴을 모두 포함하는 블록을 찾음
-    # LLM이 [STORY 1]을 썼을지, [STORY]만 썼을지 모르기 때문에 유연하게 파싱
+    # STORY, CHOICE A, CHOICE B 패턴을 모두 포함하는 블록을 찾음
     pattern = r"\[STORY\s?\d*\](.*?)\[CHOICE\s?\d*A\](.*?)\[CHOICE\s?\d*B\](.*?)(?:---|$)"
     matches = re.findall(pattern, text, re.DOTALL)
     
@@ -106,29 +126,69 @@ def parse_scenario(text):
         choice_a = match[1].strip()
         choice_b = match[2].strip()
         
-        # 최소한의 텍스트가 있어야 유효한 단계로 간주
         if story and choice_a and choice_b:
              scenario.append({"story": story, "a": choice_a, "b": choice_b})
     
-    # 최소 3단계는 보장하도록 함 (AI 자율 결정의 최소 기준)
+    # 최소 3단계는 보장하도록 함
     if len(scenario) >= 3:
         return scenario 
     else:
-        # 파싱은 성공했지만 단계 수가 부족하거나, 형식이 완전히 깨진 경우
         return None
 
-# ... (생략: get_four_step_feedback 및 generate_step_4_feedback 함수는 동일) ...
-# ... (생략: 메인 앱 로직도 동일, 변경된 함수를 사용함) ...
+def get_four_step_feedback(choice, reason, story_context, rag_data=""):
+    """4단계 피드백을 모두 생성하여 리스트로 반환 (RAG 무력화)"""
+    
+    # 1. 공감/칭찬 + 교육과정 연계
+    prompt_1 = (
+        f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
+        f"학생 선택: {choice}, 이유: {reason}\n\n"
+        "초등학생에게 따뜻한 말투로 '공감과 칭찬'을 해주고, 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 설명하는 피드백을 한 단락으로 작성해줘."
+    )
+    
+    # 2. 사고 확장 질문
+    prompt_2 = (
+        f"# 상황:\n{story_context}\n학생 선택: {choice}\n\n"
+        "학생에게 '사고 확장 질문'을 하나만 던져줘. (예: 반대 입장은 어떨까? 친구는 어떻게 느꼈을까?)"
+    )
+    
+    try:
+        feedback_1 = ask_gpt(prompt_1)
+        feedback_2 = ask_gpt(prompt_2)
+        
+        return [
+            {"type": "feedback", "content": feedback_1}, 
+            {"type": "question", "content": feedback_2}, 
+            {"type": "user_response", "content": None},  
+            {"type": "final_feedback", "content": None} 
+        ]
+    except Exception as e:
+        st.error(f"피드백 생성 오류: {e}")
+        return None
 
-# --- 6. 메인 앱 로직 (핵심 부분만 다시 포함) ---
+def generate_step_4_feedback(initial_reason, user_answer, choice, story_context, rag_data=""):
+    """최종 수정 지도와 종합 정리 피드백 생성 (RAG 무력화)"""
+    
+    prompt = (
+        f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
+        f"학생의 첫 이유: {initial_reason}\n"
+        f"학생의 두 번째 응답 (사고 확장 질문에 대한 답변): {user_answer}\n"
+        f"학생 선택: {choice}\n\n"
+        "위 내용을 바탕으로 초등학생에게 줄 최종 피드백을 작성해줘.\n"
+        "1. [수정 지도]: 학생의 첫 답변이나 두 번째 답변에서 혹시 잘못된 생각(예: 친구 비하, 욕설, 개인정보 공개 등)이 있었다면 따뜻하게 고쳐줘.\n"
+        "2. [종합 정리]: 학생의 전체 고민 과정을 칭찬하고, 다음 이야기로 넘어갈 수 있도록 격려하는 메시지를 한 단락으로 작성해줘."
+    )
+    return ask_gpt(prompt)
 
-# 세션 초기화 및 상태 변수 정의 (이전과 동일)
+
+# --- 6. 메인 앱 로직 ---
+
+# 세션 초기화 및 상태 변수 정의 (★ NameError 해결: DEFAULT -> DEFAULT_RAG_DATA)
 if 'scenario' not in st.session_state: st.session_state.scenario = None
 if 'scenario_images' not in st.session_state: st.session_state.scenario_images = []
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
-if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA 
+if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA # NameError 수정
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
 if 'selected_choice' not in st.session_state: st.session_state.selected_choice = None
@@ -167,6 +227,11 @@ if mode == "교사용 (수업 개설)":
         if not input_topic.strip():
             st.warning("⚠️ 주제를 입력해야 시나리오를 만들 수 있어요!")
         else:
+            # 상태 초기화 (새로운 시나리오 생성 시)
+            st.session_state.scenario = None
+            st.session_state.scenario_analysis = None
+            st.session_state.total_steps = 0
+
             with st.spinner("AI가 딜레마 시나리오를 창작 중입니다..."):
                 raw = create_scenario(input_topic, st.session_state.rag_text)
                 
@@ -210,36 +275,42 @@ if mode == "교사용 (수업 개설)":
         st.write("---")
         st.subheader("📜 생성된 수업 내용 확인 (단계별)")
         
-        tabs = st.tabs([f"{i+1}단계" for i in range(st.session_state.total_steps)])
-        
-        for i, tab in enumerate(tabs):
-            with tab:
-                if i < len(st.session_state.scenario):
-                    step = st.session_state.scenario[i]
-                    st.markdown(f"### 📖 {i+1}단계 이야기")
-                    st.info(step['story'])
-                    c1, c2 = st.columns(2)
-                    with c1: st.success(f"**🅰️ 선택지:** {step['a']}")
-                    with c2: st.warning(f"**🅱️ 선택지:** {step['b']}")
-                    st.write("---")
-                    
-                    col_btn, col_img = st.columns([1, 2])
-                    with col_btn:
-                        if st.button(f"🎨 {i+1}단계 그림 그리기", key=f"gen_{i}"):
-                            with st.spinner("AI 화가가 그림을 그리는 중..."):
-                                url = generate_image(step['story'])
-                                if url:
-                                    st.session_state.scenario_images[i] = url
-                                    st.rerun()
-                    with col_img:
-                        if i < len(st.session_state.scenario_images) and st.session_state.scenario_images[i]:
-                            st.image(st.session_state.scenario_images[i], width=400)
-                else:
-                    st.error(f"⚠️ {i+1}단계 시나리오 데이터가 불완전합니다.")
+        # 탭 생성: total_steps가 0일 경우 st.tabs 자체가 실행되지 않도록 위에서 보호됨
+        if st.session_state.total_steps > 0:
+            tabs = st.tabs([f"{i+1}단계" for i in range(st.session_state.total_steps)])
+            
+            for i, tab in enumerate(tabs):
+                with tab:
+                    if i < len(st.session_state.scenario):
+                        step = st.session_state.scenario[i]
+                        st.markdown(f"### 📖 {i+1}단계 이야기")
+                        st.info(step['story'])
+                        c1, c2 = st.columns(2)
+                        with c1: st.success(f"**🅰️ 선택지:** {step['a']}")
+                        with c2: st.warning(f"**🅱️ 선택지:** {step['b']}")
+                        st.write("---")
+                        
+                        col_btn, col_img = st.columns([1, 2])
+                        with col_btn:
+                            if st.button(f"🎨 {i+1}단계 그림 그리기", key=f"gen_{i}"):
+                                with st.spinner("AI 화가가 그림을 그리는 중..."):
+                                    url = generate_image(step['story'])
+                                    if url:
+                                        # 동적 배열에 이미지 저장
+                                        # ensure the list is large enough
+                                        if i >= len(st.session_state.scenario_images):
+                                             st.session_state.scenario_images.extend([None] * (i - len(st.session_state.scenario_images) + 1))
+                                        st.session_state.scenario_images[i] = url
+                                        st.rerun()
+                        with col_img:
+                            if i < len(st.session_state.scenario_images) and st.session_state.scenario_images[i]:
+                                st.image(st.session_state.scenario_images[i], width=400)
+                    else:
+                        st.error(f"⚠️ {i+1}단계 시나리오 데이터가 불완전합니다.")
 
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면 (유동적 단계 로직 유지)
+# 🙋‍♂️ 학생용 화면
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
@@ -293,7 +364,8 @@ elif mode == "학생용 (수업 참여)":
             idx = st.session_state.current_step
             total_steps = st.session_state.total_steps
             data = st.session_state.scenario[idx]
-            img = st.session_state.scenario_images[idx]
+            # 이미지 배열이 현재 단계까지 충분한 크기인지 확인
+            img = st.session_state.scenario_images[idx] if idx < len(st.session_state.scenario_images) else None
 
             st.markdown(f"### 📖 Part {idx + 1} / {total_steps}")
             if img: st.image(img)
