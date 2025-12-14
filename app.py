@@ -25,7 +25,7 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. RAG DATA 무력화 (빈 값으로 설정) ---
+# --- 4. RAG DATA 무력화 및 상수 설정 ---
 DEFAULT_RAG_DATA = "" 
 SCENARIO_STEPS = 6 # 시나리오 단계 6으로 설정
 
@@ -58,10 +58,8 @@ def generate_image(prompt):
     except:
         return None
 
-def create_scenario(topic, rag_data=""): # RAG 데이터 기본값 무력화
-    """6단계 시나리오 생성 요청"""
-    # RAG 데이터는 빈 문자열로 전달되어 AI의 자율적인 창작을 유도합니다.
-    
+def create_scenario(topic, rag_data=""): 
+    """6단계 시나리오 생성 요청 (RAG 무력화)"""
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
@@ -76,6 +74,34 @@ def create_scenario(topic, rag_data=""): # RAG 데이터 기본값 무력화
     )
     return ask_gpt(prompt)
 
+def analyze_scenario(topic, full_scenario_text):
+    """생성된 시나리오를 분석하여 3가지 항목 추출"""
+    prompt = (
+        f"교사가 '{topic}' 주제로 아래 6단계 시나리오를 만들었습니다:\n"
+        f"--- 시나리오 텍스트 ---\n{full_scenario_text}\n\n"
+        "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
+        "(주의: RAG 데이터가 제공되지 않았으므로, 교육과정 내용은 AI의 자율적인 판단에 기반합니다.)\n"
+        "\n"
+        "# 출력 형식 (태그만 사용):\n"
+        "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙]\n"
+        "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 (예: 6실05-05 인공지능이 사회에 미치는 영향을 탐색한다.)]\n"
+        "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용 (최대 2줄)]"
+    )
+    analysis = ask_gpt(prompt)
+    
+    result = {}
+    try:
+        result['ethical_standard'] = re.search(r"\[윤리 기준\](.*?)\[성취기준\]", analysis, re.DOTALL).group(1).strip()
+        result['achievement_std'] = re.search(r"\[성취기준\](.*?)\[학습 내용\]", analysis, re.DOTALL).group(1).strip()
+        result['learning_content'] = re.search(r"\[학습 내용\](.*)", analysis, re.DOTALL).group(1).strip()
+    except:
+        result = {
+            'ethical_standard': '분석 실패 (AI가 태그를 정확히 따르지 않았습니다.)',
+            'achievement_std': '분석 실패',
+            'learning_content': '분석 실패'
+        }
+    return result
+
 def parse_scenario(text):
     """시나리오 파싱 (6단계로 확장)"""
     if not text: return None
@@ -88,13 +114,10 @@ def parse_scenario(text):
             choice_b = re.search(r"\[CHOICE\s?\dB\](.*)", part, re.DOTALL).group(1).strip()
             scenario.append({"story": story, "a": choice_a, "b": choice_b})
         except: continue
-    # 6단계 시나리오가 모두 생성되었는지 확인
     return scenario if len(scenario) >= SCENARIO_STEPS else None
 
-# --- [수정] 피드백 함수들 (RAG 데이터 사용 무력화 및 최종 보고서 기능 제거) ---
-
 def get_four_step_feedback(choice, reason, story_context, rag_data=""):
-    """4단계 피드백을 모두 생성하여 리스트로 반환"""
+    """4단계 피드백을 모두 생성하여 리스트로 반환 (RAG 무력화)"""
     
     # 1. 공감/칭찬 + 교육과정 연계
     prompt_1 = (
@@ -124,7 +147,7 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
         return None
 
 def generate_step_4_feedback(initial_reason, user_answer, choice, story_context, rag_data=""):
-    """최종 수정 지도와 종합 정리 피드백 생성"""
+    """최종 수정 지도와 종합 정리 피드백 생성 (RAG 무력화)"""
     
     prompt = (
         f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
@@ -137,46 +160,41 @@ def generate_step_4_feedback(initial_reason, user_answer, choice, story_context,
     )
     return ask_gpt(prompt)
 
-# (참고: final_summary 함수는 최종 보고서 기능 제거를 위해 주석 처리하거나 사용하지 않습니다.)
-
 
 # --- 6. 메인 앱 로직 ---
 
-# 세션 초기화 (6단계에 맞게 수정)
+# 세션 초기화 및 상태 변수 정의
 if 'scenario' not in st.session_state: st.session_state.scenario = None
 if 'scenario_images' not in st.session_state: st.session_state.scenario_images = [None] * SCENARIO_STEPS
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
-if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA # RAG 데이터는 빈 값으로 유지됨
+if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA 
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
 if 'selected_choice' not in st.session_state: st.session_state.selected_choice = None
 if 'waiting_for_reason' not in st.session_state: st.session_state.waiting_for_reason = False
 if 'feedback_stage' not in st.session_state: st.session_state.feedback_stage = 0 
 if 'feedback_data' not in st.session_state: st.session_state.feedback_data = None 
-# 최종 보고서 기능 제거를 위해 learning_records 및 final_report 관련 세션은 초기화만 유지
 if 'learning_records' not in st.session_state: st.session_state.learning_records = []
-if 'final_report' not in st.session_state: st.session_state.final_report = None
 if 'lesson_complete' not in st.session_state: st.session_state.lesson_complete = False
 if 'initial_reason' not in st.session_state: st.session_state.initial_reason = "" 
+if 'scenario_analysis' not in st.session_state: st.session_state.scenario_analysis = None # 새 분석 결과 저장
 
 st.sidebar.title("🏫 AI 윤리 학습 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
 
 # ==========================================
-# 👨‍🏫 교사용 화면 (6단계에 맞게 수정)
+# 👨‍🏫 교사용 화면 (분석 칸 추가)
 # ==========================================
 if mode == "교사용 (수업 개설)":
     st.header("👨‍🏫 교사용: 교육과정 기반 수업 만들기 (RAG 제거됨)")
     
-    # PDF 첨부 기능 유지
     with st.expander("➕ 외부 자료 업로드 (RAG 테스트용 PDF 첨부 기능)"):
         uploaded_file = st.file_uploader("txt 파일 업로드", type=["txt", "pdf"])
-        # (주의: RAG가 무력화되어 업로드 내용은 AI가 실질적으로 활용하지 않음)
         if uploaded_file and uploaded_file.type == 'text/plain':
             string_data = uploaded_file.getvalue().decode("utf-8")
-            st.session_state.rag_text = string_data # 이 값은 AI에게 빈 문자열로 전달됨
+            st.session_state.rag_text = string_data
             st.success("✅ 외부 자료 업로드 완료 (AI의 지식 기반으로는 사용되지 않습니다)")
         elif uploaded_file and uploaded_file.type == 'application/pdf':
             st.warning("PDF는 텍스트로 자동 변환되지 않아 AI 학습에 활용될 수 없습니다.")
@@ -190,7 +208,12 @@ if mode == "교사용 (수업 개설)":
         else:
             with st.spinner("AI가 6단계 딜레마 시나리오를 창작 중입니다..."):
                 raw = create_scenario(input_topic, st.session_state.rag_text)
+                
+                # 원본 텍스트 저장 (분석을 위해 필요)
+                st.session_state.full_scenario_text = raw 
+                
                 parsed = parse_scenario(raw)
+                
                 if parsed:
                     st.session_state.scenario = parsed
                     st.session_state.topic = input_topic
@@ -200,19 +223,39 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.feedback_stage = 0
                     st.session_state.learning_records = []
                     st.session_state.lesson_complete = False
-                    st.success("RAG 제거된 6단계 시나리오 생성 완료!")
+                    st.success("RAG 제거된 6단계 시나리오 생성 완료! 분석 중입니다...")
+                    
+                    # 💡 시나리오 분석 요청
+                    with st.spinner("AI가 스스로 근거 윤리 기준을 분석 중입니다..."):
+                        analysis = analyze_scenario(input_topic, st.session_state.full_scenario_text)
+                        st.session_state.scenario_analysis = analysis
+                    
+                    st.success("시나리오 분석 완료! 아래에서 확인하세요.")
+                else:
+                    st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않습니다. 다시 시도해 주세요.")
 
-    # 교사용 미리보기 (6단계 탭 방식)
-    if st.session_state.scenario:
+
+    # [추가된 기능] 분석 결과 요약 칸
+    if st.session_state.scenario and st.session_state.scenario_analysis:
         st.write("---")
-        st.subheader("📜 생성된 수업 내용 확인 (총 6단계)")
+        st.subheader("📊 AI가 분석한 학습 목표 (할루시네이션 확인 영역)")
+        
+        cols = st.columns(3)
+        with cols[0]:
+            st.metric("1. 근거 윤리 기준 (AI 주장)", st.session_state.scenario_analysis['ethical_standard'])
+        with cols[1]:
+            st.metric("2. 연계 성취기준 (AI 주장)", st.session_state.scenario_analysis['achievement_std'])
+        with cols[2]:
+            st.metric("3. 주요 학습 내용", st.session_state.scenario_analysis['learning_content'])
+
+        st.write("---")
+        st.subheader(f"📜 생성된 수업 내용 확인 (총 {SCENARIO_STEPS}단계)")
         
         # 6단계 탭 생성
         tabs = st.tabs([f"{i+1}단계" for i in range(SCENARIO_STEPS)])
         
         for i, tab in enumerate(tabs):
             with tab:
-                # 인덱스 범위 확인
                 if i < len(st.session_state.scenario):
                     step = st.session_state.scenario[i]
                     st.markdown(f"### 📖 {i+1}단계 이야기")
@@ -239,16 +282,16 @@ if mode == "교사용 (수업 개설)":
 
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면 (6단계에 맞게 수정)
+# 🙋‍♂️ 학생용 화면 (6단계 로직 유지)
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
     # [A] 튜토리얼 (생략)
     if not st.session_state.tutorial_complete:
         st.header("🎒 연습 시간: 테스트 봇과 친해지기")
+        # ... (튜토리얼 로직은 위 코드와 동일하게 유지) ...
         st.progress((st.session_state.tutorial_step + 1) / 3, text=f"진행률: {st.session_state.tutorial_step + 1}/3 단계")
 
-        # 1단계
         if st.session_state.tutorial_step == 0:
             st.markdown("### 1단계: 버튼 누르기 연습")
             with st.chat_message("assistant", avatar="🤖"):
@@ -262,7 +305,6 @@ elif mode == "학생용 (수업 참여)":
                 st.toast("완벽해! 겨울을 좋아하는구나.")
                 st.session_state.tutorial_step = 1; st.rerun()
 
-        # 2단계
         elif st.session_state.tutorial_step == 1:
             st.markdown("### 2단계: 글자 쓰기 연습")
             with st.chat_message("assistant", avatar="🤖"):
@@ -271,7 +313,6 @@ elif mode == "학생용 (수업 참여)":
             if user_input := st.chat_input("여기에 인사를 적고 엔터(Enter)를 쳐봐!"):
                 st.balloons(); st.session_state.tutorial_step = 2; st.rerun()
 
-        # 3단계
         elif st.session_state.tutorial_step == 2:
             st.markdown("### 완료: 준비 끝!")
             with st.chat_message("assistant", avatar="🤖"):
@@ -279,7 +320,7 @@ elif mode == "학생용 (수업 참여)":
                 st.markdown('<p style="font-size:1.2em;">아래 버튼을 누르면 진짜 수업이 시작될 거야.</p>', unsafe_allow_html=True)
             if st.button("🚀 수업 시작하기", type="primary", use_container_width=True):
                 st.session_state.tutorial_complete = True; st.rerun()
-
+    
     # [B] 본 수업 진행
     elif not st.session_state.lesson_complete:
         st.header(f"🙋‍♂️ 학습하기: {st.session_state.topic}")
@@ -287,7 +328,7 @@ elif mode == "학생용 (수업 참여)":
         if not st.session_state.scenario or st.session_state.current_step >= len(st.session_state.scenario):
             st.warning("선생님이 아직 수업을 안 만들었거나 시나리오가 끝났어! (교사용 모드에서 먼저 만들어주세요)")
             if st.session_state.current_step >= SCENARIO_STEPS:
-                 st.session_state.lesson_complete = True # 시나리오 단계 완료
+                 st.session_state.lesson_complete = True
                  st.rerun()
         else:
             if st.button("🔄 연습 다시하기", type="secondary"):
@@ -301,10 +342,8 @@ elif mode == "학생용 (수업 참여)":
             if img: st.image(img)
             st.info(data['story'])
 
-            # --- 채팅 기록 출력 (단계별 대화 포함) ---
             current_chat_log = st.session_state.chat_log
             
-            # 피드백 단계 중일 때, 이미 출력된 이전 단계 피드백만 보여줌
             if st.session_state.feedback_stage > 0:
                 for log in current_chat_log:
                     role = "나" if log["role"] == "user" else "테스트 봇"
@@ -312,7 +351,6 @@ elif mode == "학생용 (수업 참여)":
                     with st.chat_message(log["role"], avatar=avatar):
                         st.write(log['content'])
 
-            # --- 1단계: 선택 및 이유 입력 대기 ---
             if st.session_state.feedback_stage == 0:
                 st.markdown('<p style="font-size:1.3em;">👇 너의 선택은?</p>', unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
@@ -321,7 +359,6 @@ elif mode == "학생용 (수업 참여)":
                 if c2.button(f"🅱️ {data['b']}", use_container_width=True):
                     st.session_state.selected_choice = data['b']; st.session_state.feedback_stage = 1; st.rerun()
 
-            # --- 2단계: 이유 입력 폼 표시 ---
             elif st.session_state.feedback_stage == 1:
                 st.success(f"선택: {st.session_state.selected_choice}")
                 st.markdown('<p style="font-size:1.3em;">🤔 왜 그렇게 선택했어?</p>', unsafe_allow_html=True)
@@ -338,35 +375,28 @@ elif mode == "학생용 (수업 참여)":
                             st.session_state.chat_log.append({"role": "user", "content": f"선택: {st.session_state.selected_choice}\n이유: {reason_input}"})
                             
                             with st.spinner("AI 선생님이 답변을 준비 중이야..."):
-                                # RAG 데이터는 빈 값으로 전달됨
                                 feedback_steps = get_four_step_feedback(
                                     st.session_state.selected_choice, reason_input, data['story'], st.session_state.rag_text
                                 )
                                 st.session_state.feedback_data = feedback_steps
                             
-                            st.session_state.feedback_stage = 2 
+                            st.session_state.feedback_stage = 2
                             st.rerun()
 
-            # --- 3단계: 피드백 1 (공감/칭찬 + 교육 연계) 출력 및 다음 대화 버튼 대기 ---
             elif st.session_state.feedback_stage == 2:
-                # 피드백 1단계 출력
                 if st.session_state.feedback_data and st.session_state.feedback_data[0]:
                     if len(current_chat_log) == 1: 
                         st.session_state.chat_log.append({"role": "assistant", "content": st.session_state.feedback_data[0]['content']})
                 
-                # 다음 단계 버튼
                 if st.button("다음 피드백 듣기 ➡️", type="primary"):
                     st.session_state.feedback_stage = 3
                     st.rerun()
 
-            # --- 4단계: 피드백 2 (사고 확장 질문) 출력 및 학생 응답 대기 ---
             elif st.session_state.feedback_stage == 3:
-                # 피드백 2단계 출력
                 if st.session_state.feedback_data and st.session_state.feedback_data[1]:
                     if not any(log.get('content') == st.session_state.feedback_data[1]['content'] for log in current_chat_log):
                          st.session_state.chat_log.append({"role": "assistant", "content": st.session_state.feedback_data[1]['content']})
                 
-                # 학생 응답 입력 폼
                 with st.form("answer_form"):
                     answer_input = st.text_area("AI 선생님의 질문에 답변해줘!", placeholder="내 생각에는...")
                     submit_answer = st.form_submit_button("답변 완료 📨")
@@ -381,12 +411,9 @@ elif mode == "학생용 (수업 참여)":
                             st.session_state.feedback_stage = 4
                             st.rerun()
 
-            # --- 5단계: 피드백 3 (수정 지도 + 종합 정리) 출력 및 다음 이야기 버튼 대기 ---
             elif st.session_state.feedback_stage == 4:
-                # 피드백 3단계 생성 및 출력
                 if st.session_state.feedback_data and not st.session_state.feedback_data[3]['content']:
                     with st.spinner("AI 선생님이 최종 답변을 준비 중이야..."):
-                        # RAG 데이터는 빈 값으로 전달됨
                         final_feedback = generate_step_4_feedback(
                             st.session_state.initial_reason,
                             st.session_state.feedback_data[2]['content'], 
@@ -397,7 +424,6 @@ elif mode == "학생용 (수업 참여)":
                         st.session_state.feedback_data[3]['content'] = final_feedback
                         st.session_state.chat_log.append({"role": "assistant", "content": final_feedback})
 
-                        # (참고: 최종 보고서 기능은 이 버전에서 제외됨)
                         st.session_state.learning_records.append({
                             "step": idx + 1,
                             "choice": st.session_state.selected_choice,
@@ -405,9 +431,8 @@ elif mode == "학생용 (수업 참여)":
                             "answer_to_question": st.session_state.feedback_data[2]['content']
                         })
                 
-                # 다음 이야기 버튼
                 if st.button("다음 이야기로 넘어가기 ➡️", type="primary"):
-                    if st.session_state.current_step < SCENARIO_STEPS - 1: # 6단계 중 5번째 단계까지는 다음 단계로
+                    if st.session_state.current_step < SCENARIO_STEPS - 1:
                         st.session_state.current_step += 1
                         st.session_state.feedback_stage = 0 
                         st.session_state.feedback_data = None
@@ -422,10 +447,9 @@ elif mode == "학생용 (수업 참여)":
     # [C] 학습 완료 (최종 보고서 기능 제거)
     else:
         st.header("🎉 학습 완료! 참 잘했어!")
-        st.markdown('<p style="font-size:1.2em;">오늘의 <b>6단계 윤리 학습</b>을 모두 마쳤어! 정말 훌륭해! </p>', unsafe_allow_html=True)
+        st.markdown(f'<p style="font-size:1.2em;">오늘의 <b>{SCENARIO_STEPS}단계 윤리 학습</b>을 모두 마쳤어! 정말 훌륭해! </p>', unsafe_allow_html=True)
         st.markdown('<p style="font-size:1.1em;">RAG 기능을 제거했기 때문에, AI가 어떤 내용을 만들어냈는지 잘 확인해봐. (할루시네이션 가능성이 높아요!)</p>', unsafe_allow_html=True)
         
-        # 임시 요약 출력
         st.write("---")
         st.write("### 👣 학습 기록 요약 (임시)")
         for record in st.session_state.learning_records:
@@ -437,7 +461,7 @@ elif mode == "학생용 (수업 참여)":
             st.session_state.current_step = 0
             st.session_state.chat_log = []
             st.session_state.learning_records = []
-            st.session_state.final_report = None
+            st.session_state.scenario_analysis = None
             st.session_state.feedback_stage = 0
             st.session_state.feedback_data = None
             st.rerun()
