@@ -2,6 +2,7 @@ import streamlit as st
 from openai import OpenAI
 import re
 import os
+import json # JSON 라이브러리 추가
 
 # --- 1. 페이지 설정 ---
 st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", page_icon="🤖", layout="wide")
@@ -30,8 +31,26 @@ DEFAULT_RAG_DATA = ""
 
 # --- 5. 함수 정의 ---
 
-def ask_gpt(prompt):
-    """GPT-4o 통신 함수"""
+def ask_gpt_json(prompt, max_tokens=2048):
+    """GPT-4o에게 JSON 형식의 응답을 요청하는 함수"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": SYSTEM_PERSONA},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}, # JSON 응답 강제
+            temperature=0.7,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        st.error(f"오류 발생: {e}")
+        return None
+
+def ask_gpt_text(prompt):
+    """GPT-4o에게 일반 텍스트 응답을 요청하는 함수"""
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -58,28 +77,40 @@ def generate_image(prompt):
         return None
 
 def create_scenario(topic, rag_data=""): 
-    """LLM 자율 판단 단계로 시나리오 생성 요청"""
+    """LLM 자율 판단 단계로 시나리오 생성 요청 (JSON 형식 강제)"""
     
-    # 🚨 [LLM 명령 강화] 출력 형식을 반드시 지키도록 강하게 지시
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
-        "아래 규칙을 **철저하게 지켜서** 딜레마 시나리오를 생성해야 합니다. **유효한 스토리가 없으면 안 됩니다.**\n"
-        "[작성 규칙 - 중요!]\n"
-        "1. 문장은 무조건 짧고 간결하게 끊어써야 해. (호흡이 길면 안 됨)\n"
-        "2. 어려운 단어는 쓰지 마.\n"
-        "3. 이 주제를 가장 잘 다룰 수 있도록 **최소 3단계에서 최대 6단계 사이**로 딜레마 단계 수를 스스로 결정하여 구성해.\n"
-        "4. 각 단계는 2~3문장 이내로 짧게 작성.\n"
-        "5. **반드시** 각 단계 끝에 **[CHOICE A]**와 **[CHOICE B]** 선택지를 포함해야 합니다.\n\n"
-        "# 출력 형식:\n[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n[STORY 2] ... --- ... [마지막 단계 스토리] ... ---"
+        "아래 규칙을 **철저하게 지켜서** 딜레마 시나리오를 생성해야 합니다. 최소 3단계에서 최대 6단계 사이로 단계 수를 스스로 결정해.\n"
+        "각 단계는 2~3문장 이내로 짧게 작성해야 해. 어려운 단어는 쓰지 마.\n"
+        "\n"
+        "# 출력 형식 (JSON): \n"
+        "{\"scenario\": [\n"
+        "  {\"story\": \"1단계 스토리\", \"choice_a\": \"선택지 A\", \"choice_b\": \"선택지 B\"},\n"
+        "  ...\n"
+        "]}"
     )
-    return ask_gpt(prompt)
+    # JSON 응답을 요청
+    raw_json = ask_gpt_json(prompt)
+    
+    if raw_json:
+        try:
+            return json.loads(raw_json)
+        except json.JSONDecodeError:
+            st.error("JSON 파싱 오류: AI가 유효하지 않은 JSON을 반환했습니다.")
+            return None
+    return None
 
-def analyze_scenario(topic, full_scenario_text):
-    """생성된 시나리오를 분석하여 3가지 항목 추출"""
+def analyze_scenario(topic, parsed_scenario):
+    """생성된 시나리오를 분석하여 3가지 항목 추출 (시나리오 텍스트 재구성)"""
+    # 파싱된 JSON 데이터를 다시 텍스트로 구성하여 분석 프롬프트에 전달
+    story_context = "\n".join([f"[{i+1}단계] {item['story']} (선택지: {item['choice_a']}, {item['choice_b']})" 
+                               for i, item in enumerate(parsed_scenario)])
+
     prompt = (
         f"교사가 '{topic}' 주제로 아래 시나리오를 만들었습니다:\n"
-        f"--- 시나리오 텍스트 ---\n{full_scenario_text}\n\n"
+        f"--- 시나리오 내용 ---\n{story_context}\n\n"
         "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
         "\n"
         "# 출력 형식 (태그만 사용):\n"
@@ -87,7 +118,7 @@ def analyze_scenario(topic, full_scenario_text):
         "[성취기준] [AI가 분석한 이 시나리오가 달성하고자 하는 교육과정의 성취기준 코드 및 내용 요약 (최대 15글자로 요약)]\n"
         "[학습 내용] [이 시나리오를 통해 학생이 최종적으로 배우게 될 핵심 윤리 내용 (최대 15글자로 요약)]"
     )
-    analysis = ask_gpt(prompt)
+    analysis = ask_gpt_text(prompt)
     
     result = {}
     try:
@@ -111,49 +142,45 @@ def analyze_scenario(topic, full_scenario_text):
         }
     return result
 
-def parse_scenario(text):
-    """시나리오 파싱 (단계 수 유동화 및 안전 로직 보강)"""
-    if not text: return None
-    scenario = []
+def parse_scenario(json_data):
+    """JSON 데이터를 파싱하여 시나리오 리스트를 반환"""
+    if not json_data or 'scenario' not in json_data:
+        return None
     
-    # STORY, CHOICE A, CHOICE B 패턴을 모두 포함하는 블록을 찾음
-    pattern = r"\[STORY\s?\d*\](.*?)\[CHOICE\s?\d*A\](.*?)\[CHOICE\s?\d*B\](.*?)(?:---|$)"
-    matches = re.findall(pattern, text, re.DOTALL)
+    scenario_list = []
     
-    for match in matches:
-        # match[0]은 스토리 텍스트, match[1]은 CHOICE A 텍스트, match[2]는 CHOICE B 텍스트
-        story = match[0].strip()
-        choice_a = match[1].strip()
-        choice_b = match[2].strip()
-        
-        if story and choice_a and choice_b:
-             scenario.append({"story": story, "a": choice_a, "b": choice_b})
+    for item in json_data['scenario']:
+        # 필수 키가 모두 있는지 확인
+        if item.get('story') and item.get('choice_a') and item.get('choice_b'):
+            scenario_list.append({
+                "story": item['story'].strip(),
+                "a": item['choice_a'].strip(),
+                "b": item['choice_b'].strip()
+            })
     
     # 최소 3단계는 보장하도록 함
-    if len(scenario) >= 3:
-        return scenario 
+    if len(scenario_list) >= 3:
+        return scenario_list
     else:
         return None
 
 def get_four_step_feedback(choice, reason, story_context, rag_data=""):
     """4단계 피드백을 모두 생성하여 리스트로 반환 (RAG 무력화)"""
     
-    # 1. 공감/칭찬 + 교육과정 연계
     prompt_1 = (
         f"# [교육과정]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생 선택: {choice}, 이유: {reason}\n\n"
         "초등학생에게 따뜻한 말투로 '공감과 칭찬'을 해주고, 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 설명하는 피드백을 한 단락으로 작성해줘."
     )
     
-    # 2. 사고 확장 질문
     prompt_2 = (
         f"# 상황:\n{story_context}\n학생 선택: {choice}\n\n"
         "학생에게 '사고 확장 질문'을 하나만 던져줘. (예: 반대 입장은 어떨까? 친구는 어떻게 느꼈을까?)"
     )
     
     try:
-        feedback_1 = ask_gpt(prompt_1)
-        feedback_2 = ask_gpt(prompt_2)
+        feedback_1 = ask_gpt_text(prompt_1)
+        feedback_2 = ask_gpt_text(prompt_2)
         
         return [
             {"type": "feedback", "content": feedback_1}, 
@@ -177,18 +204,18 @@ def generate_step_4_feedback(initial_reason, user_answer, choice, story_context,
         "1. [수정 지도]: 학생의 첫 답변이나 두 번째 답변에서 혹시 잘못된 생각(예: 친구 비하, 욕설, 개인정보 공개 등)이 있었다면 따뜻하게 고쳐줘.\n"
         "2. [종합 정리]: 학생의 전체 고민 과정을 칭찬하고, 다음 이야기로 넘어갈 수 있도록 격려하는 메시지를 한 단락으로 작성해줘."
     )
-    return ask_gpt(prompt)
+    return ask_gpt_text(prompt)
 
 
 # --- 6. 메인 앱 로직 ---
 
-# 세션 초기화 및 상태 변수 정의 (★ NameError 해결: DEFAULT -> DEFAULT_RAG_DATA)
+# 세션 초기화 및 상태 변수 정의
 if 'scenario' not in st.session_state: st.session_state.scenario = None
 if 'scenario_images' not in st.session_state: st.session_state.scenario_images = []
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
-if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA # NameError 수정
+if 'rag_text' not in st.session_state: st.session_state.rag_text = DEFAULT_RAG_DATA 
 if 'tutorial_complete' not in st.session_state: st.session_state.tutorial_complete = False
 if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 0
 if 'selected_choice' not in st.session_state: st.session_state.selected_choice = None
@@ -231,13 +258,15 @@ if mode == "교사용 (수업 개설)":
             st.session_state.scenario = None
             st.session_state.scenario_analysis = None
             st.session_state.total_steps = 0
+            st.session_state.scenario_images = [] # 이미지 초기화
 
             with st.spinner("AI가 딜레마 시나리오를 창작 중입니다..."):
-                raw = create_scenario(input_topic, st.session_state.rag_text)
+                raw_json = create_scenario(input_topic, st.session_state.rag_text) # JSON 요청
                 
-                st.session_state.full_scenario_text = raw 
-                
-                parsed = parse_scenario(raw)
+                if raw_json:
+                    parsed = parse_scenario(raw_json)
+                else:
+                    parsed = None
                 
                 if parsed:
                     st.session_state.scenario = parsed
@@ -251,7 +280,7 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.lesson_complete = False
                     
                     with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
-                        analysis = analyze_scenario(input_topic, st.session_state.full_scenario_text)
+                        analysis = analyze_scenario(input_topic, st.session_state.scenario)
                         st.session_state.scenario_analysis = analysis
                     
                     st.success(f"총 {st.session_state.total_steps}단계 시나리오 생성 및 분석 완료!")
@@ -275,7 +304,7 @@ if mode == "교사용 (수업 개설)":
         st.write("---")
         st.subheader("📜 생성된 수업 내용 확인 (단계별)")
         
-        # 탭 생성: total_steps가 0일 경우 st.tabs 자체가 실행되지 않도록 위에서 보호됨
+        # 탭 생성: total_steps가 0일 경우 실행되지 않도록 보호
         if st.session_state.total_steps > 0:
             tabs = st.tabs([f"{i+1}단계" for i in range(st.session_state.total_steps)])
             
@@ -296,8 +325,7 @@ if mode == "교사용 (수업 개설)":
                                 with st.spinner("AI 화가가 그림을 그리는 중..."):
                                     url = generate_image(step['story'])
                                     if url:
-                                        # 동적 배열에 이미지 저장
-                                        # ensure the list is large enough
+                                        # 이미지 배열 크기가 충분하도록 보장
                                         if i >= len(st.session_state.scenario_images):
                                              st.session_state.scenario_images.extend([None] * (i - len(st.session_state.scenario_images) + 1))
                                         st.session_state.scenario_images[i] = url
@@ -364,7 +392,6 @@ elif mode == "학생용 (수업 참여)":
             idx = st.session_state.current_step
             total_steps = st.session_state.total_steps
             data = st.session_state.scenario[idx]
-            # 이미지 배열이 현재 단계까지 충분한 크기인지 확인
             img = st.session_state.scenario_images[idx] if idx < len(st.session_state.scenario_images) else None
 
             st.markdown(f"### 📖 Part {idx + 1} / {total_steps}")
