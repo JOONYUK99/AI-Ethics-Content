@@ -120,7 +120,6 @@ def generate_image(prompt):
 def create_scenario(topic, rag_data=""): 
     """LLM 자율 판단 단계로 시나리오 생성 요청 (JSON 형식 강제)"""
     
-    # 🚨 [최종 강화된 규칙] 윤리교육과 무관한 주제일 경우 고정된 오류 JSON을 출력하도록 명령
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준 (RAG 지식 베이스):\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
@@ -223,9 +222,9 @@ def parse_scenario(json_data):
     else:
         return None
 
-# ... (feedback 함수들은 동일) ...
 def get_four_step_feedback(choice, reason, story_context, rag_data=""):
-    # ... (함수 내용 동일) ...
+    """4단계 피드백을 모두 생성하여 리스트로 반환"""
+    
     prompt_1 = (
         f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생 선택: {choice}, 이유: {reason}\n\n"
@@ -252,7 +251,8 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
         return None
 
 def generate_step_4_feedback(initial_reason, user_answer, choice, story_context, rag_data=""):
-    # ... (함수 내용 동일) ...
+    """최종 수정 지도와 종합 정리 피드백 생성"""
+    
     prompt = (
         f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생의 첫 이유: {initial_reason}\n"
@@ -264,9 +264,10 @@ def generate_step_4_feedback(initial_reason, user_answer, choice, story_context,
     )
     return ask_gpt_text(prompt)
 
+
 # --- 6. 메인 앱 로직 ---
 
-# 세션 초기화 및 상태 변수 정의 (생략, 기존과 동일)
+# 세션 초기화 및 상태 변수 정의
 if 'scenario' not in st.session_state: st.session_state.scenario = None
 if 'scenario_images' not in st.session_state: st.session_state.scenario_images = []
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
@@ -315,10 +316,9 @@ if mode == "교사용 (수업 개설)":
                 # RAG 데이터와 함께 시나리오 생성 요청
                 raw_json_data = create_scenario(input_topic, st.session_state.rag_text) 
                 
-                # 🚨 [수정] 오류 JSON을 받았는지 먼저 확인
+                # 🚨 오류 JSON을 받았는지 먼저 확인
                 if raw_json_data and "error" in raw_json_data:
                     st.error(f"⚠️ 주제 관련 오류: {raw_json_data['error']}")
-                    # 분석 실패 상태로 유지
                     parsed = None
                 elif raw_json_data:
                     parsed = parse_scenario(raw_json_data)
@@ -348,7 +348,6 @@ if mode == "교사용 (수업 개설)":
 
 
     # 분석 결과 요약 칸 (세로 배열, 마크다운 제거 완료)
-    # 🚨 [수정] 오류 시 이 블록이 실행되지 않도록 상위 if/elif 조건이 처리함.
     if st.session_state.scenario and st.session_state.scenario_analysis:
         st.write("---")
         st.subheader(f"📊 AI가 분석한 학습 목표 (총 {st.session_state.total_steps}단계)")
