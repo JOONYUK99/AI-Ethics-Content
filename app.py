@@ -25,9 +25,8 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. RAG DATA 무력화 및 상수 설정 ---
+# --- 4. RAG DATA 무력화 ---
 DEFAULT_RAG_DATA = "" 
-SCENARIO_STEPS = 6 # 시나리오 단계 6으로 설정
 
 # --- 5. 함수 정의 ---
 
@@ -59,7 +58,9 @@ def generate_image(prompt):
         return None
 
 def create_scenario(topic, rag_data=""): 
-    """6단계 시나리오 생성 요청"""
+    """LLM 자율 판단 단계로 시나리오 생성 요청"""
+    
+    # LLM에게 딜레마 단계 수를 스스로 결정하도록 지시
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준:\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
@@ -67,17 +68,17 @@ def create_scenario(topic, rag_data=""):
         "[작성 규칙 - 중요!]\n"
         "1. 문장은 무조건 짧고 간결하게 끊어써야 해. (호흡이 길면 안 됨)\n"
         "2. 어려운 단어는 쓰지 마.\n"
-        f"3. 총 {SCENARIO_STEPS}단계로 구성 (각 단계는 도입-전개-위기-결말 중 1단계와 유사한 흐름)\n"
+        "3. 이 주제를 가장 잘 다룰 수 있도록 **최소 3단계에서 최대 6단계 사이**로 딜레마 단계 수를 스스로 결정하여 구성해.\n"
         "4. 각 단계는 2~3문장 이내로 짧게 작성.\n"
         "5. 각 단계 끝에 [CHOICE A], [CHOICE B] 선택지 포함\n\n"
-        "# 출력 형식:\n[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n[STORY 2] ... --- ... [STORY 6] ... ---"
+        "# 출력 형식:\n[STORY 1] ... [CHOICE 1A] ... [CHOICE 1B] ...\n---\n[STORY 2] ... --- ... [마지막 단계 스토리] ... ---"
     )
     return ask_gpt(prompt)
 
 def analyze_scenario(topic, full_scenario_text):
     """생성된 시나리오를 분석하여 3가지 항목 추출"""
     prompt = (
-        f"교사가 '{topic}' 주제로 아래 6단계 시나리오를 만들었습니다:\n"
+        f"교사가 '{topic}' 주제로 아래 시나리오를 만들었습니다:\n"
         f"--- 시나리오 텍스트 ---\n{full_scenario_text}\n\n"
         "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
         "\n"
@@ -90,15 +91,18 @@ def analyze_scenario(topic, full_scenario_text):
     
     result = {}
     try:
-        # 정규표현식은 그대로 유지하되, AI의 응답이 요약되도록 프롬프트를 수정했음
+        # 글자 길이 제한을 위해 strip() 후 첫 15글자만 사용
+        def truncate_metric(text):
+            return text if len(text) <= 15 else text[:15] + "..."
+            
         ethical_standard = re.search(r"\[윤리 기준\](.*?)\[성취기준\]", analysis, re.DOTALL).group(1).strip()
         achievement_std = re.search(r"\[성취기준\](.*?)\[학습 내용\]", analysis, re.DOTALL).group(1).strip()
         learning_content = re.search(r"\[학습 내용\](.*)", analysis, re.DOTALL).group(1).strip()
         
         result = {
-            'ethical_standard': ethical_standard,
-            'achievement_std': achievement_std,
-            'learning_content': learning_content
+            'ethical_standard': truncate_metric(ethical_standard),
+            'achievement_std': truncate_metric(achievement_std),
+            'learning_content': truncate_metric(learning_content)
         }
     except:
         result = {
@@ -109,18 +113,25 @@ def analyze_scenario(topic, full_scenario_text):
     return result
 
 def parse_scenario(text):
-    """시나리오 파싱 (6단계로 확장)"""
+    """시나리오 파싱 (단계 수 유동화)"""
     if not text: return None
     scenario = []
     parts = text.split('---')
     for part in parts:
         try:
+            # STORY, CHOICE A, CHOICE B가 모두 포함된 파트만 유효한 단계로 간주
             story = re.search(r"\[STORY\s?\d\](.*?)(?=\[CHOICE)", part, re.DOTALL).group(1).strip()
             choice_a = re.search(r"\[CHOICE\s?\dA\](.*?)(?=\[CHOICE)", part, re.DOTALL).group(1).strip()
             choice_b = re.search(r"\[CHOICE\s?\dB\](.*)", part, re.DOTALL).group(1).strip()
             scenario.append({"story": story, "a": choice_a, "b": choice_b})
-        except: continue
-    return scenario if len(scenario) >= SCENARIO_STEPS else None
+        except: 
+             continue # 파싱이 실패한 부분은 무시하고 다음 파트로 넘어감
+    
+    # 최소 3단계는 보장하도록 함
+    if len(scenario) >= 3:
+        return scenario 
+    else:
+        return None
 
 def get_four_step_feedback(choice, reason, story_context, rag_data=""):
     """4단계 피드백을 모두 생성하여 리스트로 반환 (RAG 무력화)"""
@@ -170,8 +181,9 @@ def generate_step_4_feedback(initial_reason, user_answer, choice, story_context,
 # --- 6. 메인 앱 로직 ---
 
 # 세션 초기화 및 상태 변수 정의
+# SCENARIO_STEPS는 이제 동적으로 결정됩니다.
 if 'scenario' not in st.session_state: st.session_state.scenario = None
-if 'scenario_images' not in st.session_state: st.session_state.scenario_images = [None] * SCENARIO_STEPS
+if 'scenario_images' not in st.session_state: st.session_state.scenario_images = [] # 배열 크기 동적 할당
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
 if 'chat_log' not in st.session_state: st.session_state.chat_log = []
 if 'topic' not in st.session_state: st.session_state.topic = ""
@@ -187,12 +199,13 @@ if 'lesson_complete' not in st.session_state: st.session_state.lesson_complete =
 if 'initial_reason' not in st.session_state: st.session_state.initial_reason = "" 
 if 'scenario_analysis' not in st.session_state: st.session_state.scenario_analysis = None
 if 'full_scenario_text' not in st.session_state: st.session_state.full_scenario_text = ""
+if 'total_steps' not in st.session_state: st.session_state.total_steps = 0 # 총 단계 수 저장
 
 st.sidebar.title("🏫 AI 윤리 학습 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
 
 # ==========================================
-# 👨‍🏫 교사용 화면 (UI 정리 완료)
+# 👨‍🏫 교사용 화면
 # ==========================================
 if mode == "교사용 (수업 개설)":
     st.header("👨‍🏫 교사용: 자율 분석 수업 만들기")
@@ -207,13 +220,13 @@ if mode == "교사용 (수업 개설)":
             st.warning("PDF는 텍스트로 자동 변환되지 않아 AI 학습에 활용될 수 없습니다.")
         
     input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: AI가 주제만으로 6단계 시나리오를 창작하고, 스스로 학습 목표를 분석합니다.")
+    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 사이의 시나리오를 창작하고 스스로 학습 목표를 분석합니다.")
     
-    if st.button("🚀 6단계 교육 시나리오 생성"):
+    if st.button("🚀 교육 시나리오 생성 (AI 단계 자율 결정)"):
         if not input_topic.strip():
             st.warning("⚠️ 주제를 입력해야 시나리오를 만들 수 있어요!")
         else:
-            with st.spinner("AI가 6단계 딜레마 시나리오를 창작 중입니다..."):
+            with st.spinner("AI가 딜레마 시나리오를 창작 중입니다..."):
                 raw = create_scenario(input_topic, st.session_state.rag_text)
                 
                 st.session_state.full_scenario_text = raw 
@@ -223,9 +236,11 @@ if mode == "교사용 (수업 개설)":
                 if parsed:
                     st.session_state.scenario = parsed
                     st.session_state.topic = input_topic
+                    st.session_state.total_steps = len(parsed) # 동적으로 단계 수 저장
                     st.session_state.current_step = 0
                     st.session_state.chat_log = []
-                    st.session_state.scenario_images = [None] * SCENARIO_STEPS
+                    # 단계 수에 맞춰 이미지 배열 크기 동적 할당
+                    st.session_state.scenario_images = [None] * st.session_state.total_steps
                     st.session_state.feedback_stage = 0
                     st.session_state.learning_records = []
                     st.session_state.lesson_complete = False
@@ -235,33 +250,29 @@ if mode == "교사용 (수업 개설)":
                         analysis = analyze_scenario(input_topic, st.session_state.full_scenario_text)
                         st.session_state.scenario_analysis = analysis
                     
-                    st.success("시나리오 생성 및 분석 완료!")
+                    st.success(f"총 {st.session_state.total_steps}단계 시나리오 생성 및 분석 완료!")
                 else:
                     st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않습니다. 다시 시도해 주세요.")
 
 
-    # [수정된 기능] 분석 결과 요약 칸
+    # 분석 결과 요약 칸
     if st.session_state.scenario and st.session_state.scenario_analysis:
         st.write("---")
-        st.subheader("📊 AI가 분석한 학습 목표")
+        st.subheader(f"📊 AI가 분석한 학습 목표 (총 {st.session_state.total_steps}단계)")
         
-        # UI 깨짐 방지를 위해 글자 수를 줄여 표시
-        def truncate_text(text):
-            return text if len(text) <= 15 else text[:15] + "..."
-
         cols = st.columns(3)
         with cols[0]:
-            st.metric("1. 근거 윤리 기준 (AI 주장)", truncate_text(st.session_state.scenario_analysis['ethical_standard']))
+            st.metric("1. 근거 윤리 기준 (AI 주장)", st.session_state.scenario_analysis['ethical_standard'])
         with cols[1]:
-            st.metric("2. 연계 성취기준 (AI 주장)", truncate_text(st.session_state.scenario_analysis['achievement_std']))
+            st.metric("2. 연계 성취기준 (AI 주장)", st.session_state.scenario_analysis['achievement_std'])
         with cols[2]:
-            st.metric("3. 주요 학습 내용", truncate_text(st.session_state.scenario_analysis['learning_content']))
+            st.metric("3. 주요 학습 내용", st.session_state.scenario_analysis['learning_content'])
 
         st.write("---")
-        st.subheader(f"📜 생성된 수업 내용 확인 (총 {SCENARIO_STEPS}단계)")
+        st.subheader("📜 생성된 수업 내용 확인 (단계별)")
         
-        # 6단계 탭 생성
-        tabs = st.tabs([f"{i+1}단계" for i in range(SCENARIO_STEPS)])
+        # 단계 수에 맞춰 탭 생성
+        tabs = st.tabs([f"{i+1}단계" for i in range(st.session_state.total_steps)])
         
         for i, tab in enumerate(tabs):
             with tab:
@@ -281,17 +292,18 @@ if mode == "교사용 (수업 개설)":
                             with st.spinner("AI 화가가 그림을 그리는 중..."):
                                 url = generate_image(step['story'])
                                 if url:
+                                    # 동적 배열에 이미지 저장
                                     st.session_state.scenario_images[i] = url
                                     st.rerun()
                     with col_img:
-                        if st.session_state.scenario_images[i]:
+                        if i < len(st.session_state.scenario_images) and st.session_state.scenario_images[i]:
                             st.image(st.session_state.scenario_images[i], width=400)
                 else:
                     st.error(f"⚠️ {i+1}단계 시나리오 데이터가 불완전합니다.")
 
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면 (6단계 로직 유지)
+# 🙋‍♂️ 학생용 화면 (유동적 단계 로직 적용)
 # ==========================================
 elif mode == "학생용 (수업 참여)":
     
@@ -335,7 +347,7 @@ elif mode == "학생용 (수업 참여)":
 
         if not st.session_state.scenario or st.session_state.current_step >= len(st.session_state.scenario):
             st.warning("선생님이 아직 수업을 안 만들었거나 시나리오가 끝났어! (교사용 모드에서 먼저 만들어주세요)")
-            if st.session_state.current_step >= SCENARIO_STEPS:
+            if st.session_state.current_step >= st.session_state.total_steps and st.session_state.total_steps > 0:
                  st.session_state.lesson_complete = True
                  st.rerun()
         else:
@@ -343,10 +355,11 @@ elif mode == "학생용 (수업 참여)":
                 st.session_state.tutorial_complete = False; st.session_state.tutorial_step = 0; st.rerun()
 
             idx = st.session_state.current_step
+            total_steps = st.session_state.total_steps
             data = st.session_state.scenario[idx]
             img = st.session_state.scenario_images[idx]
 
-            st.markdown(f"### 📖 Part {idx + 1} / {SCENARIO_STEPS}")
+            st.markdown(f"### 📖 Part {idx + 1} / {total_steps}")
             if img: st.image(img)
             st.info(data['story'])
 
@@ -439,8 +452,9 @@ elif mode == "학생용 (수업 참여)":
                             "answer_to_question": st.session_state.feedback_data[2]['content']
                         })
                 
+                # 다음 이야기 버튼 (총 단계 수 사용)
                 if st.button("다음 이야기로 넘어가기 ➡️", type="primary"):
-                    if st.session_state.current_step < SCENARIO_STEPS - 1:
+                    if st.session_state.current_step < st.session_state.total_steps - 1:
                         st.session_state.current_step += 1
                         st.session_state.feedback_stage = 0 
                         st.session_state.feedback_data = None
@@ -455,7 +469,7 @@ elif mode == "학생용 (수업 참여)":
     # [C] 학습 완료 
     else:
         st.header("🎉 학습 완료! 참 잘했어!")
-        st.markdown(f'<p style="font-size:1.2em;">오늘의 <b>{SCENARIO_STEPS}단계 윤리 학습</b>을 모두 마쳤어! 정말 훌륭해! </p>', unsafe_allow_html=True)
+        st.markdown(f'<p style="font-size:1.2em;">오늘의 <b>{st.session_state.total_steps}단계 윤리 학습</b>을 모두 마쳤어! 정말 훌륭해! </p>', unsafe_allow_html=True)
         st.markdown('<p style="font-size:1.1em;">AI가 생성한 학습 내용을 교사용 화면에서 다시 한번 확인해보세요.</p>', unsafe_allow_html=True)
         
         st.write("---")
@@ -472,4 +486,5 @@ elif mode == "학생용 (수업 참여)":
             st.session_state.scenario_analysis = None
             st.session_state.feedback_stage = 0
             st.session_state.feedback_data = None
+            st.session_state.total_steps = 0
             st.rerun()
