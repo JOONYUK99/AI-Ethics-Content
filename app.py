@@ -2,7 +2,7 @@ import streamlit as st
 from openai import OpenAI
 import re
 import os
-import json # JSON 라이브러리 추가
+import json 
 
 # --- 1. 페이지 설정 ---
 st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", page_icon="🤖", layout="wide")
@@ -40,7 +40,7 @@ def ask_gpt_json(prompt, max_tokens=2048):
                 {"role": "system", "content": SYSTEM_PERSONA},
                 {"role": "user", "content": prompt}
             ],
-            response_format={"type": "json_object"}, # JSON 응답 강제
+            response_format={"type": "json_object"}, 
             temperature=0.7,
             max_tokens=max_tokens
         )
@@ -91,20 +91,19 @@ def create_scenario(topic, rag_data=""):
         "  ...\n"
         "]}"
     )
-    # JSON 응답을 요청
     raw_json = ask_gpt_json(prompt)
     
     if raw_json:
         try:
             return json.loads(raw_json)
         except json.JSONDecodeError:
-            st.error("JSON 파싱 오류: AI가 유효하지 않은 JSON을 반환했습니다. 텍스트 형식 불규칙 문제 해결을 위해 JSON을 강제했습니다. 다시 시도해 주세요.")
+            st.error("JSON 파싱 오류: AI가 유효하지 않은 JSON을 반환했습니다. 다시 시도해 주세요.")
             return None
     return None
 
 def analyze_scenario(topic, parsed_scenario):
-    """생성된 시나리오를 분석하여 3가지 항목 추출 (시나리오 텍스트 재구성)"""
-    # 파싱된 JSON 데이터를 다시 텍스트로 구성하여 분석 프롬프트에 전달
+    """생성된 시나리오를 분석하여 3가지 항목 추출"""
+    # Key Error 방지: parsed_scenario는 이미 유효한 리스트입니다.
     story_context = "\n".join([f"[{i+1}단계] {item['story']} (선택지: {item['a']}, {item['b']})" 
                                for i, item in enumerate(parsed_scenario)])
 
@@ -122,7 +121,6 @@ def analyze_scenario(topic, parsed_scenario):
     
     result = {}
     try:
-        # 글자 길이 제한 함수
         def truncate_metric(text):
             return text if len(text) <= 15 else text[:15] + "..."
             
@@ -151,13 +149,14 @@ def parse_scenario(json_data):
     scenario_list = []
     
     for item in json_data['scenario']:
-        # 필수 키가 모두 있는지 확인
+        # 필수 키가 모두 있는지 확인 (KeyError 방지)
         if item.get('story') and item.get('choice_a') and item.get('choice_b'):
             scenario_list.append({
                 "story": item['story'].strip(),
                 "a": item['choice_a'].strip(),
                 "b": item['choice_b'].strip()
             })
+        # 키가 부족하면 해당 아이템은 무시
     
     # 최소 3단계는 보장하도록 함
     if len(scenario_list) >= 3:
@@ -289,18 +288,26 @@ if mode == "교사용 (수업 개설)":
                     st.error("⚠️ 시나리오 생성에 실패했거나, 형식이 맞지 않아 3단계 미만으로 생성되었습니다. 다시 시도해 주세요.")
 
 
-    # 분석 결과 요약 칸
+    # 분석 결과 요약 칸 (세로 배열로 수정)
     if st.session_state.scenario and st.session_state.scenario_analysis:
         st.write("---")
         st.subheader(f"📊 AI가 분석한 학습 목표 (총 {st.session_state.total_steps}단계)")
         
-        cols = st.columns(3)
-        with cols[0]:
-            st.metric("1. 근거 윤리 기준 (AI 주장)", st.session_state.scenario_analysis['ethical_standard'])
-        with cols[1]:
-            st.metric("2. 연계 성취기준 (AI 주장)", st.session_state.scenario_analysis['achievement_std'])
-        with cols[2]:
-            st.metric("3. 주요 학습 내용", st.session_state.scenario_analysis['learning_content'])
+        # 세로 배열로 변경하여 가시성 및 안정성 확보
+        analysis = st.session_state.scenario_analysis
+        
+        st.markdown(f"""
+        <div style='border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;'>
+            **1. 근거 윤리 기준 (AI 주장)**: {analysis['ethical_standard']}
+        </div>
+        <div style='border: 1px solid #ccc; padding: 10px; border-radius: 5px; margin-bottom: 10px;'>
+            **2. 연계 성취기준 (AI 주장)**: {analysis['achievement_std']}
+        </div>
+        <div style='border: 1px solid #ccc; padding: 10px; border-radius: 5px;'>
+            **3. 주요 학습 내용**: {analysis['learning_content']}
+        </div>
+        """, unsafe_allow_html=True)
+
 
         st.write("---")
         st.subheader("📜 생성된 수업 내용 확인 (단계별)")
