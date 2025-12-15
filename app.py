@@ -9,6 +9,7 @@ st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", 
 
 # --- 2. OpenAI 클라이언트 설정 ---
 try:
+    # 환경 변수에서 API 키를 가져옵니다.
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 except Exception:
     st.error("⚠️ OpenAI API 키를 설정해주세요! (Streamlit Cloud Settings -> Secrets 확인)")
@@ -26,32 +27,33 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. RAG DATA 최종 통합 (형님께서 제공하신 자료 기반) ---
+# --- 4. RAG DATA 최종 통합 (지식 베이스) ---
 DEFAULT_RAG_DATA = """
 [핵심 교육과정 및 AI 윤리 기준 (RAG 지식 베이스)]
 
 --- 1. AI 윤리 기준 및 주요 사례 분석 (표 P-19, 표 P-15 통합) ---
 
 [윤리 기준] 프라이버시 보호:
-- 근거: 초등학교 교사 대상 콘텐츠 요구 주제 중 가장 높음. AI 전 생애주기에 걸쳐 개인 정보 오용 최소화.
+- 근거: 초등학교 교사 대상 분석 결과 인공지능 윤리 교육 콘텐츠에 필요한 주제로 가장 높은 요구를 받음. AI 전 생애주기에 걸쳐 개인 정보의 오용을 최소화해야 함.
 - 사례: 대기업 사내 챗봇 기밀 유출 (2023).
 
 [윤리 기준] 연대성:
-- 근거: 초등학교 교사 대상 콘텐츠 요구 주제 중 두 번째. AI 전 주기에 걸쳐 다양한 주체들의 공정한 참여 기회 보장.
-- 학생 요구: 생성형 AI 소통 예절이 다양한 집단 간 관계 연대성과 연관.
+- 근거: 초등학교 교사 대상 분석 결과 2번째로 높은 요구를 받음. AI 전 주기에 걸쳐 다양한 주체들의 공정한 참여 기회 보장.
+- 학생 요구: 생성형 AI 소통 예절이 연대성의 다양한 집단 간의 관계 연관성 있음.
 - 사례: 무인 AI 키오스크로 기기 어려움을 겪은 어르신들 (2023~현재).
 
 [윤리 기준] 데이터 관리:
-- 근거: 초등학교 교사 대상 콘텐츠 요구 주제 중 세 번째. 데이터 수집 및 활용 과정에서 데이터 편향성에 대한 위반 행위를 경계해야 함.
+- 근거: 초등학교 교사 대상 분석 결과 3번째로 높은 요구를 받음. 데이터 수집 및 활용 과정에서 데이터 편향성에 대한 위반 행위를 경계해야 함.
+- 핵심 성취기준: [6실05-05] 인공지능의 학습 원리를 이해하며 여기서 데이터의 중요성 및 관리 방안이 연관성 있음.
 - 학생 요구: 주 사용목적인 정보검색 및 취미활동과 연관.
 - 사례: 한국인 이미지 생성 편향성 (2023).
 
 [윤리 기준] 침해금지:
-- 근거: 초등학생 대상 요구 분석 시 AI의 올바른 활용 교육이 중요. AI를 인간에게 직접적인 해를 입히는 목적으로 활용해서는 안 됨.
+- 근거: 초등학생 대상 요구 분석 결과 인공지능의 올바른 활용 교육이 중요함. AI를 인간에게 직접적인 해를 입히는 목적으로 활용해서는 안 됨.
 - 사례: 딥페이크 학교폭력 사태 (2024).
 
 [윤리 기준] 안전성:
-- 근거: AI 활용 과정에서 잠재적 위험(욕설) 발생 시, 사용자가 작동을 제어할 수 있는 기능을 갖추도록 노력해야 함과 관련.
+- 근거: 인공지능 활용 과정에서 잠재적 위험(욕설) 발생 시, 사용자가 그 작동을 제어할 수 있는 기능을 갖추도록 노력해야 함과 관련.
 - 사례: AI 챗봇 이루다 혐오 발언 (2023).
 
 --- 2. 연계 성취기준 및 교육 목표 (성취기준 및 근거) ---
@@ -117,8 +119,30 @@ def generate_image(prompt):
     except:
         return None
 
+# 개인정보 필터링 함수 (GPT-4o 전달 전 처리)
+def pii_filter(text):
+    """
+    정규 표현식(Regex)을 사용하여 사용자 입력에서 개인 식별 정보(PII)를 탐지하고 마스킹/제거합니다.
+    """
+    original_text = text
+    
+    # 1. 휴대폰 번호 형식 (01X-XXXX-XXXX)
+    text = re.sub(r'01\d{1}[-\s]?\d{3,4}[-\s]?\d{4}', '[전화번호]', text)
+    
+    # 2. 이메일 주소 형식
+    text = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '[이메일 주소]', text)
+    
+    # 3. 주민등록번호 (가정: 6자리-7자리, 보안상 노출 금지)
+    text = re.sub(r'\d{6}[-\s]?[1-4]\d{6}', '[주민번호]', text)
+    
+    if original_text != text:
+        st.warning("⚠️ 개인정보(전화번호, 이메일, 주민번호 등)가 감지되어 메시지의 일부가 필터링(마스킹)되었습니다. 안전한 대화를 위해 개인정보를 입력하지 말아 주세요.")
+        return text
+    
+    return text
+
 def create_scenario(topic, rag_data=""): 
-    """LLM 자율 판단 단계로 시나리오 생성 요청 (JSON 형식 강제)"""
+    """LLM 자율 판단 단계로 시나리오 생성 요청 (RAG 적용 및 오정보 거부 로직)"""
     
     prompt = (
         f"# 참고할 교육과정 및 윤리 기준 (RAG 지식 베이스):\n{rag_data}\n\n" 
@@ -139,6 +163,19 @@ def create_scenario(topic, rag_data=""):
     )
     raw_json = ask_gpt_json(prompt)
     
+    log_entry = {
+        "timestamp": str(st.session_state.get('start_time', 'N/A')),
+        "topic": topic,
+        "input_prompt": prompt,
+        "raw_output": raw_json,
+        "status": "Success" if raw_json and 'error' not in json.loads(raw_json) else "Failure"
+    }
+
+    # 로그 기록 (단, 세션이 살아있을 때만)
+    if 'scenario_logs' not in st.session_state:
+        st.session_state.scenario_logs = []
+    st.session_state.scenario_logs.append(log_entry)
+
     if raw_json:
         try:
             json_obj = json.loads(raw_json)
@@ -154,7 +191,7 @@ def create_scenario(topic, rag_data=""):
     return None
 
 def analyze_scenario(topic, parsed_scenario, rag_data=""):
-    """생성된 시나리오를 분석하여 3가지 항목 추출"""
+    """생성된 시나리오를 분석하여 3가지 항목 추출 (RAG 적용)"""
     
     story_context = "\n".join([f"[{i+1}단계] {item.get('story', '스토리 없음')} (선택지: {item.get('a', 'A 없음')}, {item.get('b', 'B 없음')})" 
                                for i, item in enumerate(parsed_scenario)])
@@ -197,7 +234,7 @@ def analyze_scenario(topic, parsed_scenario, rag_data=""):
 
 def parse_scenario(json_data):
     """JSON 데이터를 파싱하여 시나리오 리스트를 반환"""
-    # 🚨 [수정] 오류 JSON 반환 시 처리
+    # 오류 JSON 반환 시 처리
     if json_data is None or "error" in json_data:
         return None
     
@@ -223,16 +260,16 @@ def parse_scenario(json_data):
         return None
 
 def get_four_step_feedback(choice, reason, story_context, rag_data=""):
-    """4단계 피드백을 모두 생성하여 리스트로 반환"""
+    """4단계 피드백을 모두 생성하여 리스트로 반환 (피드백 간소화 및 호칭 통일 적용)"""
     
     prompt_1 = (
         f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
-        f"학생 선택: {choice}, 이유: {reason}\n\n"
-        "초등학생에게 따뜻한 말투로 '공감과 칭찬'을 해주고, 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 설명하는 피드백을 한 단락으로 작성해줘. 이 답변에도 RAG 지식 베이스를 활용해야 해."
+        f"학생의 선택: {choice}, 이유: {reason}\n\n"
+        "초등학생에게 따뜻한 말투로 **공감과 칭찬**을 해주세요. 이어서, 학생의 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 **가장 핵심적인 내용만 뽑아** 설명하세요. 이 두 가지 내용을 합쳐서 **2문장 이내**로 짧고 명확하게 작성해 주세요. (RAG 지식 베이스 활용)"
     )
     
     prompt_2 = (
-        f"# 상황:\n{story_context}\n학생 선택: {choice}\n\n"
+        f"# 상황:\n{story_context}\n학생의 선택: {choice}\n\n"
         "학생에게 '사고 확장 질문'을 하나만 던져줘. (예: 반대 입장은 어떨까? 친구는 어떻게 느꼈을까?)"
     )
     
@@ -251,23 +288,23 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
         return None
 
 def generate_step_4_feedback(initial_reason, user_answer, choice, story_context, rag_data=""):
-    """최종 수정 지도와 종합 정리 피드백 생성"""
+    """최종 수정 지도와 종합 정리 피드백 생성 (피드백 간소화 및 호칭 통일 적용)"""
     
     prompt = (
         f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생의 첫 이유: {initial_reason}\n"
         f"학생의 두 번째 응답 (사고 확장 질문에 대한 답변): {user_answer}\n"
-        f"학생 선택: {choice}\n\n"
-        "위 내용을 바탕으로 초등학생에게 줄 최종 피드백을 작성해줘.\n"
-        "1. [수정 지도]: 학생의 첫 답변이나 두 번째 답변에서 혹시 잘못된 생각(예: 친구 비하, 욕설, 개인정보 공개 등)이 있었다면 따뜻하게 고쳐줘.\n"
-        "2. [종합 정리]: 학생의 전체 고민 과정을 칭찬하고, 다음 이야기로 넘어갈 수 있도록 격려하는 메시지를 한 단락으로 작성해줘."
+        f"학생의 선택: {choice}\n\n"
+        "위 내용을 바탕으로 초등학생에게 줄 최종 피드백을 작성해줘. **전체 답변을 두 단락으로 나누어** 작성해.\n"
+        "1. **[수정 지도]**: 학생의 답변에 잘못된 생각(예: 욕설, 개인정보 공개 등)이 있었다면 **가장 필요한 부분만 골라** 따뜻하게 고쳐줘. (2문장 이내)\n"
+        "2. **[종합 정리]**: 학생의 고민 과정을 칭찬하고 다음 이야기로 넘어갈 수 있도록 **간결하게** 격려하는 메시지를 작성해줘. (2문장 이내)"
     )
     return ask_gpt_text(prompt)
 
 
 # --- 6. 메인 앱 로직 ---
 
-# 세션 초기화 및 상태 변수 정의
+# 세션 초기화 및 상태 변수 정의 (RAG 데이터는 DEFAULT_RAG_DATA로 초기화)
 if 'scenario' not in st.session_state: st.session_state.scenario = None
 if 'scenario_images' not in st.session_state: st.session_state.scenario_images = []
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
@@ -286,6 +323,7 @@ if 'initial_reason' not in st.session_state: st.session_state.initial_reason = "
 if 'scenario_analysis' not in st.session_state: st.session_state.scenario_analysis = None
 if 'full_scenario_text' not in st.session_state: st.session_state.full_scenario_text = ""
 if 'total_steps' not in st.session_state: st.session_state.total_steps = 0 
+if 'scenario_logs' not in st.session_state: st.session_state.scenario_logs = [] # LLM 호출 로그 저장
 
 st.sidebar.title("🏫 AI 윤리 학습 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
@@ -296,16 +334,28 @@ mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여
 if mode == "교사용 (수업 개설)":
     st.header("👨‍🏫 교사용: 자율 분석 수업 만들기")
     
+    # 🚨 [새로운 기능] LLM 호출 로그 보기
+    with st.expander("📝 LLM 호출 로그 (RAG 테스트 및 검증용)"):
+        if st.session_state.scenario_logs:
+            st.dataframe(st.session_state.scenario_logs)
+        else:
+            st.info("시나리오를 생성하면 LLM 호출 기록이 여기에 나타납니다.")
+
     with st.expander("➕ 외부 자료 업로드 (참고용)"):
-        st.write("외부 자료 업로드 기능은 현재 AI 윤리 기준 테스트를 위해 기본값(형님이 제공하신 RAG 데이터)으로 유지됩니다.")
+        # 🚨 [수정] 안내 문구 제거
+        pass
         
     input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 시나리오를 창작하고 스스로 학습 목표를 분석합니다.")
+    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 시나리오를 창작하고 스스로 학습 목표를 분석합니다. **'축구 토트넘'처럼 관련 없는 주제를 입력하여 경고 문구를 확인해보세요.**")
     
     if st.button("🚀 교육 시나리오 생성 (AI 단계 자율 결정)"):
         if not input_topic.strip():
             st.warning("⚠️ 주제를 입력해야 시나리오를 만들 수 있어요!")
         else:
+            # 시나리오 생성 시작 시간 기록 (로그용)
+            import datetime
+            st.session_state.start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             # 상태 초기화 (새로운 시나리오 생성 시)
             st.session_state.scenario = None
             st.session_state.scenario_analysis = None
@@ -316,7 +366,7 @@ if mode == "교사용 (수업 개설)":
                 # RAG 데이터와 함께 시나리오 생성 요청
                 raw_json_data = create_scenario(input_topic, st.session_state.rag_text) 
                 
-                # 🚨 오류 JSON을 받았는지 먼저 확인
+                # 오류 JSON을 받았는지 먼저 확인
                 if raw_json_data and "error" in raw_json_data:
                     st.error(f"⚠️ 주제 관련 오류: {raw_json_data['error']}")
                     parsed = None
@@ -354,24 +404,13 @@ if mode == "교사용 (수업 개설)":
         
         analysis = st.session_state.scenario_analysis
         
-        # 굵은 별표(**) 마크다운 제거 완료
-        st.markdown(f"""
-        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px; font-size: 1.1em;'>
-            1. 근거 윤리 기준 (AI 주장): 
-            <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['ethical_standard']}</p>
-        </div>
-        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; margin-bottom: 10px; font-size: 1.1em;'>
-            2. 연계 성취기준 (AI 주장): 
-            <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['achievement_std']}</p>
-        </div>
-        <div style='border: 1px solid #ccc; padding: 15px; border-radius: 5px; font-size: 1.1em;'>
-            3. 주요 학습 내용: 
-            <p style='margin-top: 5px; margin-bottom: 0px;'>{analysis['learning_content']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-
+        # UI 최종 정리: HTML 마크다운 제거 및 깔끔한 출력
+        st.markdown(f"**1. 근거 윤리 기준 (AI 주장):** \n{analysis['ethical_standard']}", unsafe_allow_html=False)
+        st.markdown(f"**2. 연계 성취기준 (AI 주장):** \n{analysis['achievement_std']}", unsafe_allow_html=False)
+        st.markdown(f"**3. 주요 학습 내용:** \n{analysis['learning_content']}", unsafe_allow_html=False)
         st.write("---")
+
+
         st.subheader("📜 생성된 수업 내용 확인 (단계별)")
         
         # 탭 생성: total_steps가 0일 경우 실행되지 않도록 보호
@@ -436,6 +475,10 @@ elif mode == "학생용 (수업 참여)":
                 st.markdown('<p style="font-size:1.2em;">버튼 누르기 성공! 참 잘했어. 👍</p>', unsafe_allow_html=True)
                 st.markdown('<p style="font-size:1.3em;">이번에는 아래 채팅창에 <b>\'안녕\'</b>이나 <b>\'반가워\'</b>라고 인사를 써볼래?</p>', unsafe_allow_html=True)
             if user_input := st.chat_input("여기에 인사를 적고 엔터(Enter)를 쳐봐!"):
+                # 개인정보 필터링 적용
+                safe_input = pii_filter(user_input)
+                
+                # 필터링된 안전한 입력으로 세션 상태 업데이트 (튜토리얼이므로 단순 진행)
                 st.balloons(); st.session_state.tutorial_step = 2; st.rerun()
 
         elif st.session_state.tutorial_step == 2:
@@ -497,12 +540,15 @@ elif mode == "학생용 (수업 참여)":
                         if not reason_input.strip():
                             st.warning("이유를 꼭 적어줘!")
                         else:
-                            st.session_state.initial_reason = reason_input
-                            st.session_state.chat_log.append({"role": "user", "content": f"선택: {st.session_state.selected_choice}\n이유: {reason_input}"})
+                            # 개인정보 필터링 적용 (이유 입력)
+                            safe_reason = pii_filter(reason_input)
+                            
+                            st.session_state.initial_reason = safe_reason
+                            st.session_state.chat_log.append({"role": "user", "content": f"선택: {st.session_state.selected_choice}\n이유: {safe_reason}"})
                             
                             with st.spinner("AI 선생님이 답변을 준비 중이야..."):
                                 feedback_steps = get_four_step_feedback(
-                                    st.session_state.selected_choice, reason_input, data['story'], st.session_state.rag_text
+                                    st.session_state.selected_choice, safe_reason, data['story'], st.session_state.rag_text
                                 )
                                 st.session_state.feedback_data = feedback_steps
                             
@@ -531,8 +577,11 @@ elif mode == "학생용 (수업 참여)":
                         if not answer_input.strip():
                             st.warning("답변을 입력해줘!")
                         else:
-                            st.session_state.feedback_data[2]['content'] = answer_input 
-                            st.session_state.chat_log.append({"role": "user", "content": f"답변: {answer_input}"})
+                            # 개인정보 필터링 적용 (질문 답변)
+                            safe_answer = pii_filter(answer_input)
+                            
+                            st.session_state.feedback_data[2]['content'] = safe_answer 
+                            st.session_state.chat_log.append({"role": "user", "content": f"답변: {safe_answer}"})
                             
                             st.session_state.feedback_stage = 4
                             st.rerun()
@@ -543,7 +592,6 @@ elif mode == "학생용 (수업 참여)":
                         final_feedback = generate_step_4_feedback(
                             st.session_state.initial_reason,
                             st.session_state.feedback_data[2]['content'], 
-                            st.session_state.selected_choice, 
                             data['story'], 
                             st.session_state.rag_text
                         )
@@ -592,4 +640,3 @@ elif mode == "학생용 (수업 참여)":
             st.session_state.feedback_data = None
             st.session_state.total_steps = 0
             st.rerun()
-
