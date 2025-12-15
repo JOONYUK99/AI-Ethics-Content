@@ -334,7 +334,7 @@ mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여
 if mode == "교사용 (수업 개설)":
     st.header("👨‍🏫 교사용: 자율 분석 수업 만들기")
     
-    # 🚨 [새로운 기능] LLM 호출 로그 보기
+    # LLM 호출 로그 보기
     with st.expander("📝 LLM 호출 로그 (RAG 테스트 및 검증용)"):
         if st.session_state.scenario_logs:
             st.dataframe(st.session_state.scenario_logs)
@@ -342,8 +342,9 @@ if mode == "교사용 (수업 개설)":
             st.info("시나리오를 생성하면 LLM 호출 기록이 여기에 나타납니다.")
 
     with st.expander("➕ 외부 자료 업로드 (참고용)"):
-        # 🚨 [수정] 안내 문구 제거
-        pass
+        # 🚨 [수정] 파일 업로드 위젯을 넣어 기능 영역 보이게 함
+        uploaded_file = st.file_uploader("여기에 RAG 지식 베이스 파일(TXT 등)을 업로드하세요.", type=['txt', 'json'])
+        # 실제 로직은 현재 DEFAULT_RAG_DATA를 사용하도록 설계되어 있습니다.
         
     input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
     st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 시나리오를 창작하고 스스로 학습 목표를 분석합니다. **'축구 토트넘'처럼 관련 없는 주제를 입력하여 경고 문구를 확인해보세요.**")
