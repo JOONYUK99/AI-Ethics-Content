@@ -3,9 +3,10 @@ from openai import OpenAI
 import re
 import os
 import json 
+import datetime # 로그 기록을 위해 추가
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="테스트 봇과 함께하는 AI 윤리 학습 (RAG-OFF)", page_icon="🤖", layout="wide")
 
 # --- 2. OpenAI 클라이언트 설정 ---
 try:
@@ -27,50 +28,9 @@ SYSTEM_PERSONA = """
 4. [말투]: "안녕! 나는 테스트 봇이야", "~했니?" 처럼 다정하고 친근한 초등 교사 말투를 사용하세요.
 """
 
-# --- 4. RAG DATA 최종 통합 (지식 베이스) ---
-DEFAULT_RAG_DATA = """
-[핵심 교육과정 및 AI 윤리 기준 (RAG 지식 베이스)]
-
---- 1. AI 윤리 기준 및 주요 사례 분석 (표 P-19, 표 P-15 통합) ---
-
-[윤리 기준] 프라이버시 보호:
-- 근거: 초등학교 교사 대상 분석 결과 인공지능 윤리 교육 콘텐츠에 필요한 주제로 가장 높은 요구를 받음. AI 전 생애주기에 걸쳐 개인 정보의 오용을 최소화해야 함.
-- 사례: 대기업 사내 챗봇 기밀 유출 (2023).
-
-[윤리 기준] 연대성:
-- 근거: 초등학교 교사 대상 분석 결과 2번째로 높은 요구를 받음. AI 전 주기에 걸쳐 다양한 주체들의 공정한 참여 기회 보장.
-- 학생 요구: 생성형 AI 소통 예절이 연대성의 다양한 집단 간의 관계 연관성 있음.
-- 사례: 무인 AI 키오스크로 기기 어려움을 겪은 어르신들 (2023~현재).
-
-[윤리 기준] 데이터 관리:
-- 근거: 초등학교 교사 대상 분석 결과 3번째로 높은 요구를 받음. 데이터 수집 및 활용 과정에서 데이터 편향성에 대한 위반 행위를 경계해야 함.
-- 핵심 성취기준: [6실05-05] 인공지능의 학습 원리를 이해하며 여기서 데이터의 중요성 및 관리 방안이 연관성 있음.
-- 학생 요구: 주 사용목적인 정보검색 및 취미활동과 연관.
-- 사례: 한국인 이미지 생성 편향성 (2023).
-
-[윤리 기준] 침해금지:
-- 근거: 초등학생 대상 요구 분석 결과 인공지능의 올바른 활용 교육이 중요함. AI를 인간에게 직접적인 해를 입히는 목적으로 활용해서는 안 됨.
-- 사례: 딥페이크 학교폭력 사태 (2024).
-
-[윤리 기준] 안전성:
-- 근거: 인공지능 활용 과정에서 잠재적 위험(욕설) 발생 시, 사용자가 그 작동을 제어할 수 있는 기능을 갖추도록 노력해야 함과 관련.
-- 사례: AI 챗봇 이루다 혐오 발언 (2023).
-
---- 2. 연계 성취기준 및 교육 목표 (성취기준 및 근거) ---
-
-[도덕과 성취기준]
-- [4도03-02]: 디지털 사회의 다양한 문제에 해결 방안을 탐구하는 윤리적 민감성 기르기.
-- [6도02-03]: 인간과 인공지능 로봇 간의 도덕에 기반을 둔 관계 형성의 필요성 (안전성의 잠재적 위험 방지 및 안전 보장 문맥과 연관).
-
-[실과(정보) 성취기준]
-- [6실05-02]: 개인정보 보호 및 인공지능의 올바른 사용법과 연관.
-- [6실05-03]: 실생활 문제 해결 프로그램 협력, 산출물 타인과 공유 같이 공익적인 목표에서 연대성과 연관.
-- [6실05-05]: 인공지능의 학습 원리를 이해하며 여기서 데이터의 중요성 및 관리 방안이 연관성 있음.
-- [6실05-01]: 컴퓨터 활용 생활 속 문제 해결 사례 탐색 및 알고리즘 표현이 침해금지의 부정적 결과에 대응 방안 마련과 연관.
-
-[핵심 목표]
-- 현대 과학기술과 관련된 윤리적 쟁점 분석을 통해 과학기술의 유용성과 한계를 인식하고, 활용에 관한 책임 의식을 길러야 함.
-"""
+# --- 4. RAG DATA 비활성화 ---
+# 🚨 [RAG 제외] 지식 베이스 내용을 빈 문자열로 설정하여 RAG 기능을 일시적으로 제거합니다.
+DEFAULT_RAG_DATA = "" 
 
 # --- 5. 함수 정의 ---
 
@@ -142,13 +102,15 @@ def pii_filter(text):
     return text
 
 def create_scenario(topic, rag_data=""): 
-    """LLM 자율 판단 단계로 시나리오 생성 요청 (RAG 적용 및 오정보 거부 로직)"""
+    """LLM 자율 판단 단계로 시나리오 생성 요청 (RAG-OFF 상태)"""
     
     prompt = (
+        # RAG 데이터는 빈 문자열로 전달되지만, 프롬프트 구조는 유지됩니다.
         f"# 참고할 교육과정 및 윤리 기준 (RAG 지식 베이스):\n{rag_data}\n\n" 
         f"# 주제: '{topic}'\n\n"
         "아래 규칙을 **철저하게 지켜서** 딜레마 시나리오를 생성해야 합니다.\n"
-        "**가장 중요한 규칙:** 입력 주제가 제공된 RAG 지식 베이스의 AI 윤리 및 교육과정과 **전혀 관련이 없다**고 판단되면, 시나리오를 생성하지 말고 **아래의 고정된 오류 JSON**을 그대로 출력하세요. 단, AI 윤리 딜레마로 **해석할 여지가 조금이라도 있다면** 정상적으로 시나리오를 생성해야 합니다.\n"
+        # 🚨 [RAG 제외] RAG 지식 베이스가 비어있으므로, 오정보 입력 시 생성 거부 로직은 불안정하게 작동할 수 있습니다.
+        "**가장 중요한 규칙:** 입력 주제가 AI 윤리 및 교육과정과 **전혀 관련이 없다**고 판단되면, 시나리오를 생성하지 말고 **아래의 고정된 오류 JSON**을 그대로 출력하세요. 단, AI 윤리 딜레마로 **해석할 여지가 조금이라도 있다면** 정상적으로 시나리오를 생성해야 합니다.\n"
         "규칙 1: 최소 3단계에서 최대 6단계 사이로 단계 수를 스스로 결정해.\n"
         "규칙 2: 각 단계는 2~3문장 이내로 짧게 작성해야 해. 어려운 단어는 쓰지 마.\n"
         "\n"
@@ -164,7 +126,7 @@ def create_scenario(topic, rag_data=""):
     raw_json = ask_gpt_json(prompt)
     
     log_entry = {
-        "timestamp": str(st.session_state.get('start_time', 'N/A')),
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "topic": topic,
         "input_prompt": prompt,
         "raw_output": raw_json,
@@ -191,16 +153,18 @@ def create_scenario(topic, rag_data=""):
     return None
 
 def analyze_scenario(topic, parsed_scenario, rag_data=""):
-    """생성된 시나리오를 분석하여 3가지 항목 추출 (RAG 적용)"""
+    """생성된 시나리오를 분석하여 3가지 항목 추출 (RAG-OFF 상태)"""
     
     story_context = "\n".join([f"[{i+1}단계] {item.get('story', '스토리 없음')} (선택지: {item.get('a', 'A 없음')}, {item.get('b', 'B 없음')})" 
                                for i, item in enumerate(parsed_scenario)])
 
     prompt = (
+        # RAG 데이터는 빈 문자열로 전달되지만, AI는 자체 지식으로 답변을 시도합니다.
         f"# 참고할 교육과정 및 윤리 기준 (RAG 지식 베이스):\n{rag_data}\n\n" 
         f"교사가 '{topic}' 주제로 아래 시나리오를 만들었습니다:\n"
         f"--- 시나리오 내용 ---\n{story_context}\n\n"
         "이 시나리오를 분석하여 다음 3가지 항목을 추출해 주세요.\n"
+        # 🚨 [RAG 제외] AI는 정확한 성취기준 코드를 인용하지 못할 가능성이 높습니다.
         "\n"
         "# 출력 형식 (태그만 사용):\n"
         "[윤리 기준] [AI가 분석한 이 시나리오에 근거가 되는 윤리 기준이나 원칙]\n"
@@ -260,12 +224,13 @@ def parse_scenario(json_data):
         return None
 
 def get_four_step_feedback(choice, reason, story_context, rag_data=""):
-    """4단계 피드백을 모두 생성하여 리스트로 반환 (피드백 간소화 및 호칭 통일 적용)"""
+    """4단계 피드백을 모두 생성하여 리스트로 반환 (RAG-OFF 상태)"""
     
     prompt_1 = (
+        # RAG 데이터는 빈 문자열로 전달됩니다.
         f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생의 선택: {choice}, 이유: {reason}\n\n"
-        "초등학생에게 따뜻한 말투로 **공감과 칭찬**을 해주세요. 이어서, 학생의 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 **가장 핵심적인 내용만 뽑아** 설명하세요. 이 두 가지 내용을 합쳐서 **2문장 이내**로 짧고 명확하게 작성해 주세요. (RAG 지식 베이스 활용)"
+        "초등학생에게 따뜻한 말투로 **공감과 칭찬**을 해주세요. 이어서, 학생의 선택한 이유가 교육과정 중 어떤 부분('정보 예절', '개인정보 보호' 등)과 연결되는지 **가장 핵심적인 내용만 뽑아** 설명하세요. 이 두 가지 내용을 합쳐서 **2문장 이내**로 짧고 명확하게 작성해 주세요."
     )
     
     prompt_2 = (
@@ -288,9 +253,10 @@ def get_four_step_feedback(choice, reason, story_context, rag_data=""):
         return None
 
 def generate_step_4_feedback(initial_reason, user_answer, choice, story_context, rag_data=""):
-    """최종 수정 지도와 종합 정리 피드백 생성 (피드백 간소화 및 호칭 통일 적용)"""
+    """최종 수정 지도와 종합 정리 피드백 생성 (RAG-OFF 상태)"""
     
     prompt = (
+        # RAG 데이터는 빈 문자열로 전달됩니다.
         f"# [교육과정 및 윤리 기준]:\n{rag_data}\n\n# 상황:\n{story_context}\n"
         f"학생의 첫 이유: {initial_reason}\n"
         f"학생의 두 번째 응답 (사고 확장 질문에 대한 답변): {user_answer}\n"
@@ -304,7 +270,7 @@ def generate_step_4_feedback(initial_reason, user_answer, choice, story_context,
 
 # --- 6. 메인 앱 로직 ---
 
-# 세션 초기화 및 상태 변수 정의 (RAG 데이터는 DEFAULT_RAG_DATA로 초기화)
+# 세션 초기화 및 상태 변수 정의 
 if 'scenario' not in st.session_state: st.session_state.scenario = None
 if 'scenario_images' not in st.session_state: st.session_state.scenario_images = []
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
@@ -323,7 +289,7 @@ if 'initial_reason' not in st.session_state: st.session_state.initial_reason = "
 if 'scenario_analysis' not in st.session_state: st.session_state.scenario_analysis = None
 if 'full_scenario_text' not in st.session_state: st.session_state.full_scenario_text = ""
 if 'total_steps' not in st.session_state: st.session_state.total_steps = 0 
-if 'scenario_logs' not in st.session_state: st.session_state.scenario_logs = [] # LLM 호출 로그 저장
+if 'scenario_logs' not in st.session_state: st.session_state.scenario_logs = [] 
 
 st.sidebar.title("🏫 AI 윤리 학습 모드")
 mode = st.sidebar.radio("모드를 선택하세요:", ["학생용 (수업 참여)", "교사용 (수업 개설)"])
@@ -342,19 +308,17 @@ if mode == "교사용 (수업 개설)":
             st.info("시나리오를 생성하면 LLM 호출 기록이 여기에 나타납니다.")
 
     with st.expander("➕ 외부 자료 업로드 (참고용)"):
-        # 🚨 [수정] 파일 업로드 위젯을 넣어 기능 영역 보이게 함
+        # 파일 업로드 위젯을 넣어 기능 영역 보이게 함
         uploaded_file = st.file_uploader("여기에 RAG 지식 베이스 파일(TXT 등)을 업로드하세요.", type=['txt', 'json'])
-        # 실제 로직은 현재 DEFAULT_RAG_DATA를 사용하도록 설계되어 있습니다.
         
     input_topic = st.text_area("오늘의 수업 주제", value=st.session_state.topic, height=100)
-    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 시나리오를 창작하고 스스로 학습 목표를 분석합니다.")
+    st.caption("💡 팁: AI가 주제에 맞춰 3~6단계 시나리오를 창작하고 스스로 학습 목표를 분석합니다. **RAG가 비활성화된 상태**에서는 AI가 **정확한 성취기준 코드를 인용하지 못할 수 있습니다.**")
     
     if st.button("🚀 교육 시나리오 생성 (AI 단계 자율 결정)"):
         if not input_topic.strip():
             st.warning("⚠️ 주제를 입력해야 시나리오를 만들 수 있어요!")
         else:
             # 시나리오 생성 시작 시간 기록 (로그용)
-            import datetime
             st.session_state.start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # 상태 초기화 (새로운 시나리오 생성 시)
@@ -364,7 +328,7 @@ if mode == "교사용 (수업 개설)":
             st.session_state.scenario_images = [] # 이미지 초기화
 
             with st.spinner("AI가 딜레마 시나리오를 창작 중입니다..."):
-                # RAG 데이터와 함께 시나리오 생성 요청
+                # RAG 데이터(빈 문자열)와 함께 시나리오 생성 요청
                 raw_json_data = create_scenario(input_topic, st.session_state.rag_text) 
                 
                 # 오류 JSON을 받았는지 먼저 확인
@@ -388,7 +352,7 @@ if mode == "교사용 (수업 개설)":
                     st.session_state.lesson_complete = False
                     
                     with st.spinner("AI가 스스로 학습 목표를 분석 중입니다..."):
-                        # RAG 데이터와 함께 분석 요청
+                        # RAG 데이터(빈 문자열)와 함께 분석 요청
                         analysis = analyze_scenario(input_topic, st.session_state.scenario, st.session_state.rag_text) 
                         st.session_state.scenario_analysis = analysis
                     
@@ -641,4 +605,3 @@ elif mode == "학생용 (수업 참여)":
             st.session_state.feedback_data = None
             st.session_state.total_steps = 0
             st.rerun()
-
