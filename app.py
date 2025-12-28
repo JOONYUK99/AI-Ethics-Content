@@ -4,145 +4,160 @@ import re
 import json
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(page_title="AI 토론 학습 지원 시스템", page_icon="🗣️", layout="wide")
+st.set_page_config(page_title="AI 토론 및 창의 학습 시스템", page_icon="🎨", layout="wide")
 
 # --- 2. OpenAI 클라이언트 설정 ---
 try:
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 except Exception:
-    st.error("⚠️ API 키를 설정해주세요!")
+    st.error("⚠️ OpenAI API 키를 설정해주세요! (Streamlit Cloud Settings -> Secrets 확인)")
     st.stop()
 
-# --- 3. [핵심] 토론 중심 시스템 페르소나 ---
+# --- 3. [핵심] 시스템 페르소나 ---
 SYSTEM_PERSONA = """
-당신은 초등학생(5~6학년)의 비판적 사고를 돕는 'AI 토론 튜터'입니다.
-모든 시나리오는 정답이 없는 '딜레마 상황'으로 구성하며, 학생이 스스로 근거를 들어 주장할 수 있도록 유도합니다.
-
-[행동 수칙]
-1. [토론 유도]: 단순히 지식을 전달하지 말고 "왜 그렇게 생각하니?", "다른 입장에서는 어떨까?" 같은 질문을 던지세요.
-2. [다양한 관점]: 특정 선택이 무조건 옳다고 하기보다, 각 선택이 가질 수 있는 장단점과 가치를 비교하게 하세요.
-3. [눈높이 교육]: 초등학생이 이해하기 쉬운 비유를 사용하고 따뜻한 격려를 잊지 마세요.
+당신은 초등학생(5~6학년)의 비판적 사고와 창의성을 돕는 'AI 토론&아트 튜터'입니다.
+정답을 제시하기보다 학생이 스스로 이유를 생각하고 표현하도록 유도하며, 필요한 경우 시각적 자료(이미지)를 통해 이해를 돕습니다.
+말투는 항상 다정하고 친근한 초등 교사의 말투(~했니?, ~단다)를 사용하세요.
 """
 
-# --- 4. 함수 정의 ---
+# --- 4. 주요 기능 함수 ---
 
-def create_debate_scenario(topic):
-    """토론용 딜레마 시나리오 생성"""
-    prompt = (
-        f"# 주제: '{topic}'\n\n"
-        "이 주제로 초등학생용 토론 수업 시나리오를 3~4단계로 만드세요.\n"
-        "각 단계는 대립하는 두 가지 가치가 부딪히는 상황이어야 합니다.\n"
-        "반드시 아래 JSON 형식으로만 응답하세요.\n"
-        "{\"scenario\": [{\"story\": \"상황 설명\", \"choice_a\": \"찬성/입장1\", \"choice_b\": \"반대/입장2\", \"debate_point\": \"교사가 참고할 토론의 핵심\"}]}"
-    )
+def ask_gpt_json(prompt):
+    """JSON 형식의 수업 설계 데이터를 생성"""
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "system", "content": SYSTEM_PERSONA}, {"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            temperature=0.7
         )
         return json.loads(response.choices[0].message.content.strip())
     except:
         return None
 
-def get_debate_feedback(choice, reason, story):
-    """학생의 주장에 대한 토론형 피드백"""
-    prompt = (
-        f"상황: {story}\n학생의 주장: {choice}\n이유: {reason}\n\n"
-        "1. 학생의 의견을 존중하며 요약해줘.\n"
-        "2. 반대 입장에서는 어떤 걱정을 할 수 있을지 '반론'을 부드럽게 제기해줘.\n"
-        "3. 다시 한번 생각해보게 하는 질문으로 마무리해줘. (3문장 이내)"
-    )
+def ask_gpt_text(prompt):
+    """텍스트 기반의 분석 및 피드백 생성"""
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "system", "content": SYSTEM_PERSONA}, {"role": "user", "content": prompt}]
+            messages=[{"role": "system", "content": SYSTEM_PERSONA}, {"role": "user", "content": prompt}],
+            temperature=0.7
         )
         return response.choices[0].message.content.strip()
     except:
-        return "오류가 발생했습니다. 다시 시도해주세요."
+        return "답변을 가져오지 못했어요. 다시 시도해볼까요?"
+
+def generate_image(prompt):
+    """수업용 삽화 생성 (DALL-E 3)"""
+    try:
+        dalle_prompt = f"A friendly, educational cartoon-style illustration for elementary school textbook, depicting: {prompt}"
+        response = client.images.generate(
+            model="dall-e-3", prompt=dalle_prompt, size="1024x1024", quality="standard", n=1
+        )
+        return response.data[0].url
+    except:
+        return None
 
 # --- 5. 메인 앱 로직 ---
 
+# 세션 상태 초기화
 if 'scenario' not in st.session_state: st.session_state.scenario = None
+if 'analysis' not in st.session_state: st.session_state.analysis = None
 if 'current_step' not in st.session_state: st.session_state.current_step = 0
-if 'feedback' not in st.session_state: st.session_state.feedback = ""
+if 'chat_history' not in st.session_state: st.session_state.chat_history = []
 
-st.sidebar.title("🏫 토론 수업 플랫폼")
-mode = st.sidebar.radio("모드 선택", ["👨‍🏫 교사용 (수업 설계)", "🙋‍♂️ 학생용 (토론 참여)"])
+st.sidebar.title("🏫 AI 지능형 학습 시스템")
+mode = st.sidebar.radio("모드 선택", ["👨‍🏫 교사용 (수업 설계)", "🙋‍♂️ 학생용 (토론 및 창작)"])
 
 # ==========================================
-# 👨‍🏫 교사용 화면: 설계 및 미리보기
+# 👨‍🏫 교사용 화면: 상세 분석 및 미리보기
 # ==========================================
 if mode == "👨‍🏫 교사용 (수업 설계)":
-    st.header("🛠️ 토론 수업 설계 및 미리보기")
-    topic = st.text_input("토론 주제 입력", placeholder="예: 무인 상점의 AI 감시 카메라 설치")
+    st.header("🛠️ 맞춤형 토론 수업 설계")
+    topic = st.text_input("오늘의 토론 주제를 입력하세요", placeholder="예: 우리 학교에 AI 로봇 선생님이 온다면?")
 
-    if st.button("🚀 토론 시나리오 구성"):
-        with st.spinner("AI가 토론 흐름을 짜는 중..."):
-            data = create_debate_scenario(topic)
-            if data:
-                st.session_state.scenario = data['scenario']
-                st.session_state.topic = topic
-                st.success("토론 수업이 구성되었습니다!")
+    if st.button("🚀 수업 시나리오 및 분석 생성"):
+        with st.spinner("AI가 수업을 설계 중입니다..."):
+            # 시나리오 생성
+            scenario_prompt = f"주제 '{topic}'에 대해 초등학생용 3단계 토론 시나리오를 만들어줘. 각 단계는 'story', 'choice_a', 'choice_b', 'debate_point'를 포함한 JSON 형식이어야 해."
+            st.session_state.scenario = ask_gpt_json(scenario_prompt)
+            
+            # 상세 분석 생성 (분리된 데이터 요청)
+            analysis_prompt = f"주제 '{topic}'의 수업 내용을 분석해서 [핵심 가치], [연계 교과], [학습 목표]를 각각 짧은 문장으로 따로따로 알려줘."
+            st.session_state.analysis = ask_gpt_text(analysis_prompt)
+            st.session_state.topic = topic
+            st.session_state.current_step = 0
+            st.success("수업 설계가 완료되었습니다!")
 
-    if st.session_state.scenario:
+    if st.session_state.analysis:
         st.write("---")
-        st.subheader(f"📊 '{st.session_state.topic}' 수업 흐름 미리보기")
+        st.subheader("📊 AI의 수업 상세 분석")
         
-        # 교사를 위한 미리보기 테이블
-        preview_data = []
-        for i, s in enumerate(st.session_state.scenario):
-            preview_data.append({
-                "단계": f"{i+1}단계",
-                "상황": s['story'],
-                "논쟁 지점": s['debate_point']
-            })
-        st.table(preview_data)
+        # 분석 내용을 줄 단위로 분리하여 시각화 (한 줄 출력을 개별 칸으로 분리)
+        lines = st.session_state.analysis.split('\n')
+        for line in lines:
+            if line.strip():
+                st.info(line)
         
-        st.info("💡 위 내용을 확인하신 후, 왼쪽 사이드바에서 '학생용' 모드로 변경하여 수업을 진행하세요.")
+        with st.expander("📜 전체 시나리오 미리보기"):
+            st.table(st.session_state.scenario['scenario'])
 
 # ==========================================
-# 🙋‍♂️ 학생용 화면: 실제 토론 진행
+# 🙋‍♂️ 학생용 화면: 토론 및 그림 생성 기능
 # ==========================================
-elif mode == "🙋‍♂️ 학생용 (토론 참여)":
+elif mode == "🙋‍♂️ 학생용 (토론 및 창작)":
     if not st.session_state.scenario:
-        st.warning("선생님이 아직 토론 주제를 정하지 않았어요!")
+        st.warning("선생님이 수업을 설계할 때까지 잠시만 기다려주세요! 😊")
     else:
         idx = st.session_state.current_step
-        step = st.session_state.scenario[idx]
-        
-        st.header(f"🗣️ 토론: {st.session_state.topic}")
-        st.progress((idx + 1) / len(st.session_state.scenario))
-        
-        st.subheader(f"Step {idx + 1}")
-        st.chat_message("assistant", avatar="🤖").write(step['story'])
+        steps = st.session_state.scenario['scenario']
+        current_data = steps[idx]
 
-        # 선택 및 이유 입력
-        col1, col2 = st.columns(2)
-        if col1.button(f"🅰️ {step['choice_a']}", use_container_width=True):
-            st.session_state.temp_choice = step['choice_a']
-        if col2.button(f"🅱️ {step['choice_b']}", use_container_width=True):
-            st.session_state.temp_choice = step['choice_b']
+        st.header(f"🗣️ 토론 학습: {st.session_state.topic}")
+        st.progress((idx + 1) / len(steps))
 
-        if 'temp_choice' in st.session_state:
-            st.write(f"**나의 입장:** {st.session_state.temp_choice}")
-            reason = st.text_area("그렇게 생각하는 근거는 무엇인가요?", key=f"reason_{idx}")
-            
-            if st.button("내 주장 전달하기 ✉️"):
-                with st.spinner("테스트 봇이 답변을 읽고 있어요..."):
-                    feedback = get_debate_feedback(st.session_state.temp_choice, reason, step['story'])
-                    st.session_state.feedback = feedback
-            
-            if st.session_state.feedback:
-                st.chat_message("assistant", avatar="🤖").write(st.session_state.feedback)
-                
-                if st.button("다음 논제로 넘어가기 ➡️"):
-                    if idx < len(st.session_state.scenario) - 1:
-                        st.session_state.current_step += 1
-                        st.session_state.feedback = ""
-                        del st.session_state.temp_choice
-                        st.rerun()
-                    else:
-                        st.balloons()
-                        st.success("오늘의 모든 토론을 마쳤습니다! 훌륭한 비판적 사고였어요!")
+        # 1. 상황 제시
+        with st.chat_message("assistant", avatar="🤖"):
+            st.write(f"**{idx+1}단계:** {current_data['story']}")
+            st.write(f"💡 **생각해볼 점:** {current_data['debate_point']}")
+
+        # 2. 입장 선택 및 이유 입력 (텍스트 기반 토론)
+        st.write("---")
+        st.subheader("📝 나의 생각 적기")
+        choice = st.radio("당신의 입장은?", [current_data['choice_a'], current_data['choice_b']], index=0)
+        reason = st.text_area("그렇게 생각한 이유를 구체적으로 적어줄래?", placeholder="내 생각에는...")
+
+        col_debate, col_draw = st.columns(2)
+        
+        with col_debate:
+            if st.button("내 의견 전달하기 📩"):
+                debate_prompt = f"상황: {current_data['story']}\n학생 선택: {choice}\n이유: {reason}\n이 주장에 대해 따뜻하게 공감해주고, 반대 입장에서는 어떤 걱정을 할 수 있을지 질문을 하나만 던져줘."
+                feedback = ask_gpt_text(debate_prompt)
+                st.session_state.chat_history.append({"role": "assistant", "content": feedback})
+        
+        with col_draw:
+            # 그림 그리기 기능 추가
+            if st.button("🎨 이 상황을 그림으로 보기"):
+                with st.spinner("AI 화가가 그림을 그리고 있어요..."):
+                    img_url = generate_image(current_data['story'])
+                    if img_url:
+                        st.session_state.chat_history.append({"role": "image", "content": img_url})
+
+        # 3. 채팅 기록 출력 (피드백 및 생성된 이미지)
+        for chat in st.session_state.chat_history:
+            if chat["role"] == "assistant":
+                with st.chat_message("assistant", avatar="🤖"):
+                    st.write(chat["content"])
+            elif chat["role"] == "image":
+                st.image(chat["content"], caption="AI가 그린 수업 장면")
+
+        # 4. 다음 단계 이동
+        st.write("---")
+        if st.button("다음 논제로 이동하기 ➡️"):
+            if idx < len(steps) - 1:
+                st.session_state.current_step += 1
+                st.session_state.chat_history = []
+                st.rerun()
+            else:
+                st.balloons()
+                st.success("와! 모든 토론과 학습을 성공적으로 마쳤어! 정말 대단해! 🎉")
