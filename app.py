@@ -23,7 +23,7 @@ SYSTEM_PERSONA = """
 # --- 4. 주요 함수 ---
 
 def ask_gpt_json(prompt):
-    """JSON 응답 요청 (오류 발생 시 빈 구조 반환하여 에러 방지)"""
+    """JSON 응답 요청 (오류 발생 시 빈 구조 반환)"""
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -32,15 +32,17 @@ def ask_gpt_json(prompt):
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            temperature=0.5 # 온도를 낮춰서 더 건조하고 정확하게
+            temperature=0.5
         )
-        data = json.loads(response.choices[0].message.content.strip())
+        content = response.choices[0].message.content.strip()
+        data = json.loads(content)
         
-        # 데이터 검증: scenario 키가 없으면 강제로 만듦
+        # [중요] 'scenario' 키가 없으면 억지로라도 만듦
         if "scenario" not in data:
             return {"scenario": []}
         return data
     except Exception:
+        # 실패하면 무조건 빈 리스트 반환
         return {"scenario": []}
 
 def ask_gpt_text(prompt):
@@ -71,19 +73,32 @@ def generate_image(prompt):
     except Exception:
         return None
 
-# --- 5. 세션 상태 안전한 초기화 ---
-# 초기화 코드를 강화하여 절대 키 에러가 나지 않게 합니다.
+# --- 5. 세션 상태 안전한 초기화 (방탄 코드) ---
+# 데이터가 딕셔너리가 아니거나, 비어있으면 강제로 초기화
 if 'scenario' not in st.session_state or not isinstance(st.session_state.scenario, dict):
     st.session_state.scenario = {"scenario": []}
-if 'analysis' not in st.session_state: st.session_state.analysis = ""
-if 'current_step' not in st.session_state: st.session_state.current_step = 0
-if 'chat_history' not in st.session_state: st.session_state.chat_history = []
-if 'topic' not in st.session_state: st.session_state.topic = ""
-if 'tutorial_done' not in st.session_state: st.session_state.tutorial_done = False
-if 'tutorial_step' not in st.session_state: st.session_state.tutorial_step = 1
+
+# 기본 변수 설정
+default_keys = {
+    'analysis': "",
+    'current_step': 0,
+    'chat_history': [],
+    'topic': "",
+    'tutorial_done': False,
+    'tutorial_step': 1
+}
+for k, v in default_keys.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # --- 6. 사이드바 ---
 st.sidebar.title("🤖 AI 윤리 학습")
+
+# [비상 버튼] 에러가 날 때 누르는 버튼
+if st.sidebar.button("⚠️ 에러 해결 / 초기화"):
+    st.session_state.clear()
+    st.rerun()
+
 mode = st.sidebar.radio("모드 선택", ["👨‍🏫 교사용", "🙋‍♂️ 학생용"])
 
 # --- 7. 메인 로직 ---
@@ -98,32 +113,34 @@ if mode == "👨‍🏫 교사용":
             st.warning("주제 필요.")
         else:
             with st.spinner("데이터 생성 중..."):
-                # 1. 시나리오 생성
+                # 시나리오 생성
                 s_prompt = f"주제 '{input_topic}'의 3단계 딜레마 시나리오 JSON 생성. 키: scenario, 내부 키: story, choice_a, choice_b."
                 result = ask_gpt_json(s_prompt)
                 st.session_state.scenario = result
                 
-                # 2. 분석 생성 (단답형 요청)
+                # 분석 생성
                 a_prompt = f"주제 '{input_topic}'의 핵심 가치, 교과, 목표를 개조식으로 요약."
                 st.session_state.analysis = ask_gpt_text(a_prompt)
                 
-                # 3. 초기화
+                # 초기화
                 st.session_state.topic = input_topic
                 st.session_state.current_step = 0
+                
                 # 이미지 캐시 삭제
-                keys = [k for k in st.session_state.keys() if k.startswith("img_url_")]
-                for k in keys: del st.session_state[k]
+                keys_to_del = [k for k in st.session_state.keys() if k.startswith("img_url_")]
+                for k in keys_to_del: del st.session_state[k]
                     
                 st.success("생성 완료.")
 
-    # 미리보기 (KeyError 원천 차단)
+    # [수정] Line 103 에러 해결: .get() 사용
+    # 데이터가 없으면 빈 리스트([])를 가져오므로 절대 에러 안 남
+    scenario_data = st.session_state.scenario.get('scenario', [])
+    
     if st.session_state.analysis:
         st.divider()
         st.subheader("분석")
         st.write(st.session_state.analysis)
 
-    # [수정된 부분] 안전하게 데이터 확인 후 출력
-    scenario_data = st.session_state.scenario.get('scenario', [])
     if scenario_data:
         with st.expander("시나리오 목록"):
             st.table(scenario_data)
@@ -172,11 +189,14 @@ elif mode == "🙋‍♂️ 학생용":
 
     # 실전 수업
     else:
-        # [수정된 부분] 안전하게 가져오기 (없으면 빈 리스트)
+        # [수정] Line 113 에러 해결: .get() 사용
+        # 강제로 빈 리스트를 반환하게 하여 프로그램이 죽는 것을 방지
         steps = st.session_state.scenario.get('scenario', [])
         
+        # 데이터가 비어있으면 안내 메시지 출력
         if not steps:
             st.warning("데이터 없음. 교사용 탭에서 생성 필요.")
+            st.info("혹시 계속 오류가 나면 왼쪽 사이드바의 '초기화' 버튼을 누르세요.")
             if st.button("새로고침"):
                 st.rerun()
         
@@ -200,20 +220,20 @@ elif mode == "🙋‍♂️ 학생용":
                 img_key = f"img_url_{idx}"
                 if img_key not in st.session_state:
                     with st.spinner("이미지 로딩..."):
+                        # 만약 story 키가 없으면 빈 문자열 반환
                         st.session_state[img_key] = generate_image(data.get('story', ''))
                 
                 if st.session_state.get(img_key):
                     st.image(st.session_state[img_key])
 
-                st.info(data.get('story', ''))
+                st.info(data.get('story', '내용 없음'))
 
                 with st.form(f"form_{idx}"):
                     sel = st.radio("선택", [data.get('choice_a', 'A'), data.get('choice_b', 'B')])
                     reason = st.text_area("이유")
                     if st.form_submit_button("제출"):
                         if reason:
-                            # 말투: 단답형 지시
-                            prompt = f"상황:{data.get('story')}, 선택:{sel}, 이유:{reason}. 이에 대해 핵심만 단답형으로 피드백하고, 짧은 반문 하나만 제시."
+                            prompt = f"상황:{data.get('story')}, 선택:{sel}, 이유:{reason}. 핵심만 단답형 피드백."
                             with st.spinner("분석..."):
                                 res = ask_gpt_text(prompt)
                                 st.session_state.chat_history.append({"role": "user", "content": f"[{sel}] {reason}"})
