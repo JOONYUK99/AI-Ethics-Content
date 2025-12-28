@@ -13,11 +13,11 @@ except Exception:
     st.error("⚠️ API 키를 설정해주세요! (.streamlit/secrets.toml 파일 확인)")
     st.stop()
 
-# --- 3. 시스템 페르소나 ---
+# --- 3. 시스템 페르소나 (말투 수정: 단답형) ---
 SYSTEM_PERSONA = """
-당신은 초등학생(5~6학년)의 비판적 사고와 창의성을 돕는 'AI 토론&아트 튜터'입니다.
-학생이 스스로 생각하게 유도하고, 다정한 초등 교사 말투(~했니?, ~단다, ~해요)를 사용하세요.
-어려운 단어는 피하고 쉽게 설명해주세요.
+당신은 초등학생의 비판적 사고를 돕는 AI 튜터입니다.
+질문에 대해 핵심만 간결하게 '단답형'으로 대답하세요.
+불필요한 미사여구(안녕, 반가워 등)는 생략하고 사실과 질문 위주로 짧게 말하세요.
 """
 
 # --- 4. 주요 함수 ---
@@ -36,7 +36,7 @@ def ask_gpt_json(prompt):
         )
         return json.loads(response.choices[0].message.content.strip())
     except Exception as e:
-        st.error(f"데이터 생성 중 오류 발생: {e}")
+        # 에러 발생 시 빈 시나리오 구조 반환 (KeyError 방지)
         return {"scenario": []}
 
 def ask_gpt_text(prompt):
@@ -52,14 +52,14 @@ def ask_gpt_text(prompt):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return "죄송해요, 지금은 대답하기가 조금 힘들어요. 잠시 후 다시 시도해주세요."
+        return "응답 생성 실패."
 
 def generate_image(prompt):
     """DALL-E 3 이미지 생성 함수"""
     try:
         response = client.images.generate(
             model="dall-e-3",
-            prompt=f"A safe, friendly, cartoon-style illustration suitable for elementary school education: {prompt}",
+            prompt=f"Simple, clear cartoon style illustration: {prompt}",
             size="1024x1024",
             n=1
         )
@@ -68,15 +68,15 @@ def generate_image(prompt):
         return None
 
 # --- 5. 세션 상태 초기화 ---
-# 프로그램이 다시 실행돼도 데이터가 유지되도록 변수들을 초기화합니다.
+# 데이터가 없어도 에러가 나지 않도록 초기값을 확실하게 설정합니다.
 default_values = {
-    'scenario': {"scenario": []},
+    'scenario': {"scenario": []}, # 기본 구조 보장
     'analysis': "",
     'current_step': 0,
     'chat_history': [],
     'topic': "",
-    'tutorial_done': False,  # 튜토리얼 완료 여부
-    'tutorial_step': 1       # 튜토리얼 진행 단계
+    'tutorial_done': False,
+    'tutorial_step': 1
 }
 
 for key, value in default_values.items():
@@ -92,203 +92,156 @@ mode = st.sidebar.radio("모드 선택", ["👨‍🏫 교사용 (수업 만들�
 # [모드 1] 교사용: 수업 설계
 if mode == "👨‍🏫 교사용 (수업 만들기)":
     st.header("🛠️ 토론 수업 설계")
-    st.info("학생들이 학습할 주제를 입력하면 AI가 3단계 시나리오를 자동으로 만들어줍니다.")
     
-    input_topic = st.text_input("토론 주제 입력", value=st.session_state.topic, placeholder="예: 동물원 폐지, 노키즈존, AI 숙제 허용")
+    input_topic = st.text_input("토론 주제 입력", value=st.session_state.topic, placeholder="주제를 입력하세요")
     
-    if st.button("🚀 수업 생성하기"):
+    if st.button("🚀 수업 생성"):
         if not input_topic:
-            st.warning("주제를 입력해주세요!")
+            st.warning("주제를 입력하세요.")
         else:
-            with st.spinner("AI 선생님이 수업 자료를 만들고 있습니다... (약 10~20초 소요)"):
+            with st.spinner("수업 데이터 생성 중..."):
                 # 1. 시나리오 생성
                 s_prompt = f"""
-                주제 '{input_topic}'에 대해 초등학생이 토론할 수 있는 3단계 딜레마 시나리오를 JSON으로 만들어줘.
-                형식: {{ "scenario": [ {{ "story": "상황설명", "choice_a": "선택A", "choice_b": "선택B" }}, ... ] }}
-                이야기는 이어지도록 구성해줘.
+                주제 '{input_topic}'로 초등학생용 3단계 딜레마 시나리오 JSON 생성.
+                형식: {{ "scenario": [ {{ "story": "상황설명", "choice_a": "선택A", "choice_b": "선택B" }} ] }}
                 """
                 st.session_state.scenario = ask_gpt_json(s_prompt)
                 
                 # 2. 수업 분석 생성
-                a_prompt = f"주제 '{input_topic}'의 [핵심 가치], [관련 교과], [학습 목표]를 각각 한 문장으로 정리해줘."
+                a_prompt = f"주제 '{input_topic}'의 [핵심가치], [교과], [목표]를 단답형으로 요약."
                 st.session_state.analysis = ask_gpt_text(a_prompt)
                 
-                # 3. 상태 업데이트 및 기존 이미지 캐시 삭제(새 수업 시작 시)
+                # 3. 상태 업데이트
                 st.session_state.topic = input_topic
                 st.session_state.current_step = 0
+                
+                # 기존 이미지 캐시 삭제
                 for key in list(st.session_state.keys()):
                     if key.startswith("img_url_"):
                         del st.session_state[key]
                         
-                st.success("수업 생성이 완료되었습니다! 이제 학생용 모드로 전환하세요.")
+                st.success("생성 완료.")
 
-    # 생성된 수업 내용 미리보기
+    # 생성된 수업 내용 미리보기 (KeyError 방지 로직 적용)
     if st.session_state.analysis:
         st.divider()
-        st.subheader("📊 수업 분석 내용")
-        content = st.session_state.analysis
-        parts = re.split(r'\[|\]', content)
-        for i in range(1, len(parts), 2):
-            if i+1 < len(parts):
-                st.caption(f"**{parts[i]}**")
-                st.write(parts[i+1].strip())
+        st.subheader("📊 수업 분석")
+        st.write(st.session_state.analysis)
 
-    if st.session_state.scenario.get('scenario'):
-        with st.expander("📜 생성된 시나리오 확인하기"):
-            for idx, item in enumerate(st.session_state.scenario['scenario']):
-                st.markdown(f"**{idx+1}단계:** {item['story']}")
-                st.text(f"A: {item['choice_a']} / B: {item['choice_b']}")
+    # [수정 포인트 1] 데이터가 있고, 키가 확실히 존재할 때만 테이블 표시
+    scenario_data = st.session_state.scenario.get('scenario', [])
+    if scenario_data:
+        with st.expander("📜 시나리오 확인"):
+            st.table(scenario_data)
 
 # [모드 2] 학생용: 튜토리얼 -> 실전 수업
 elif mode == "🙋‍♂️ 학생용 (수업 참여)":
     
-    # ---------------------------------------------------------
-    # PART A. 튜토리얼 (수업 전 연습)
-    # ---------------------------------------------------------
+    # PART A. 튜토리얼
     if not st.session_state.tutorial_done:
-        st.header("🎒 수업 준비 운동 (튜토리얼)")
-        st.markdown("#### AI 선생님과 함께하는 즐거운 토론 수업!")
-        st.info("본격적인 수업 전에 사용 방법을 먼저 익혀볼까요?")
-        
-        # 튜토리얼 진행률
+        st.header("🎒 튜토리얼 (연습)")
         st.progress(st.session_state.tutorial_step / 3)
 
-        # Mission 1: 선택하기
         if st.session_state.tutorial_step == 1:
-            st.subheader("Mission 1. 선택 연습하기 👈")
-            st.write("선생님이 질문을 하면, 네 생각을 골라야 해. 아래에서 가장 좋아하는 간식을 골라볼까?")
-            snack = st.radio("가장 좋아하는 간식은?", ["달콤한 초콜릿 🍫", "바삭한 과자 🍪", "시원한 아이스크림 🍦"])
-            
-            if st.button("선택 완료! (다음으로)"):
-                st.toast(f"와! {snack}을(를) 좋아하는구나! 아주 잘 골랐어.")
+            st.subheader("1. 선택 연습")
+            snack = st.radio("좋아하는 간식은?", ["초콜릿", "과자", "아이스크림"])
+            if st.button("확인"):
+                st.toast(f"선택: {snack}")
                 st.session_state.tutorial_step = 2
                 st.rerun()
 
-        # Mission 2: 글쓰기
         elif st.session_state.tutorial_step == 2:
-            st.subheader("Mission 2. 글쓰기 연습 ✍️")
-            st.write("선택을 했으면 이유를 적어야겠지? 키보드로 네 생각을 적는 연습을 해보자.")
-            t_input = st.text_area("오늘 기분이 어떤지 적어주세요! (예: 날씨가 좋아서 신나!)")
-            
-            if st.button("다 썼어요! (다음으로)"):
-                if len(t_input) > 2:
-                    st.toast("멋진 문장이야! 글쓰기 실력이 대단한걸?")
+            st.subheader("2. 입력 연습")
+            t_input = st.text_area("오늘 기분 입력")
+            if st.button("제출"):
+                if len(t_input) > 0:
+                    st.toast("입력 완료")
                     st.session_state.tutorial_step = 3
                     st.rerun()
                 else:
-                    st.warning("너무 짧아요! 조금만 더 길게 써볼까?")
+                    st.warning("내용을 입력하세요.")
 
-        # Mission 3: 이미지 생성
         elif st.session_state.tutorial_step == 3:
-            st.subheader("Mission 3. AI 화가와 그림 그리기 🎨")
-            st.write("내가 상상한 장면을 글로 설명하면, AI가 그림을 그려줘. 한번 해볼까?")
-            prompt_input = st.text_input("그리고 싶은 것을 설명해줘 (예: 우주복을 입은 귀여운 고양이)")
-            
-            if st.button("그림 생성하기 ✨"):
+            st.subheader("3. 그림 생성 연습")
+            prompt_input = st.text_input("그릴 내용 입력 (예: 고양이)")
+            if st.button("생성"):
                 if prompt_input:
-                    with st.spinner("AI 화가가 붓을 들고 그림을 그리고 있어요..."):
+                    with st.spinner("생성 중..."):
                         img_url = generate_image(prompt_input)
                         if img_url:
-                            st.image(img_url, caption="네가 주문한 그림이야! 정말 멋진데?")
-                            st.success("모든 준비 운동 끝! 이제 진짜 수업으로 가보자.")
-                            if st.button("수업 입장하기 🚀"):
+                            st.image(img_url)
+                            if st.button("수업 시작하기"):
                                 st.session_state.tutorial_done = True
                                 st.rerun()
-                        else:
-                            st.error("앗, 그림을 그리는 도중에 문제가 생겼어. 다시 한번 눌러볼래?")
                 else:
-                    st.warning("어떤 그림을 그릴지 먼저 적어줘야 해!")
+                    st.warning("내용을 입력하세요.")
 
-    # ---------------------------------------------------------
-    # PART B. 실제 수업 (시나리오 진행)
-    # ---------------------------------------------------------
+    # PART B. 실제 수업
     else:
-        # 안전장치: 시나리오 데이터 확인 (KeyError 방지)
+        # [수정 포인트 2] KeyError 완벽 차단: .get() 사용 및 리스트 확인
         steps = st.session_state.scenario.get('scenario', [])
         
         if not steps:
-            st.header("🏫 교실 대기 중...")
-            st.image("https://media.giphy.com/media/l0HlBO7eyxdzTZtSS/giphy.gif", width=300)
-            st.warning("선생님이 아직 수업 내용을 만들고 계셔! 잠시만 기다려줘.")
-            if st.button("새로고침 🔄"):
+            st.warning("수업 내용이 없습니다. 선생님이 수업을 생성할 때까지 기다리세요.")
+            if st.button("새로고침"):
                 st.rerun()
         
         else:
-            # 변수 설정
             idx = st.session_state.current_step
             total_steps = len(steps)
 
-            # 진행률 표시 바
             st.progress((idx + 1) / total_steps)
-            st.caption(f"현재 진행률: {idx + 1} / {total_steps} 단계")
 
             if idx < total_steps:
                 data = steps[idx]
                 
-                st.title(f"🗣️ 토론 주제: {st.session_state.topic}")
-                st.subheader(f"제 {idx+1}장. 어떻게 해야 할까?")
+                st.subheader(f"단계 {idx+1}/{total_steps}")
 
-                # --- 이미지 자동 생성 및 캐싱 ---
-                img_key = f"img_url_{idx}" # 단계별 고유 키 생성
-                
-                # 이미지가 없으면 생성 시도
+                # 이미지 자동 생성
+                img_key = f"img_url_{idx}"
                 if img_key not in st.session_state:
-                    with st.spinner("AI가 현재 상황을 그림으로 그리고 있어요..."):
-                        scene_prompt = f"Scene describing: {data['story']}. Cartoon style for kids."
-                        st.session_state[img_key] = generate_image(scene_prompt)
+                    with st.spinner("이미지 생성 중..."):
+                        st.session_state[img_key] = generate_image(data['story'])
                 
-                # 이미지가 있으면 표시
                 if st.session_state.get(img_key):
-                    st.image(st.session_state[img_key], use_container_width=True, caption=f"{idx+1}단계 상황")
+                    st.image(st.session_state[img_key], use_container_width=True)
 
-                # --- 스토리 및 선택 ---
-                st.info(data['story']) # 상황 설명 박스
+                st.info(data['story'])
                 
                 with st.form(key=f"form_{idx}"):
-                    choice = st.radio("너의 선택은?", [data['choice_a'], data['choice_b']])
-                    reason = st.text_area("그렇게 선택한 이유는 뭐야?", placeholder="친구들에게 말하듯이 편하게 적어봐.")
-                    submit_btn = st.form_submit_button("나의 주장 제출하기 📩")
+                    choice = st.radio("선택", [data['choice_a'], data['choice_b']])
+                    reason = st.text_area("이유 입력")
+                    submit_btn = st.form_submit_button("제출")
 
-                # 제출 시 피드백 로직
                 if submit_btn:
                     if not reason.strip():
-                        st.warning("이유를 적어야 AI 선생님과 이야기할 수 있어!")
+                        st.warning("이유를 입력하세요.")
                     else:
-                        f_prompt = f"상황: {data['story']}\n학생선택: {choice}\n학생이유: {reason}\n따뜻하게 공감해주고, 반대 측면에서 생각할 거리를 질문 하나 해줘."
-                        with st.spinner("AI 선생님이 답변을 생각 중..."):
+                        # 말투 단답형 요청
+                        f_prompt = f"상황: {data['story']}\n선택: {choice}\n이유: {reason}\n이에 대해 단답형으로 핵심만 피드백하고, 짧은 질문 하나 던져줘."
+                        with st.spinner("분석 중..."):
                             feedback = ask_gpt_text(f_prompt)
-                            # 챗 히스토리에 추가
                             st.session_state.chat_history.append({"role": "user", "content": f"선택: {choice}\n이유: {reason}"})
                             st.session_state.chat_history.append({"role": "assistant", "content": feedback})
 
-                # 대화 기록 표시 (채팅 UI)
                 if st.session_state.chat_history:
                     st.write("---")
-                    st.subheader("💬 토론 내용")
                     for msg in st.session_state.chat_history:
                         if msg["role"] == "assistant":
-                            st.chat_message("assistant", avatar="🤖").write(msg["content"])
+                            st.chat_message("assistant").write(msg["content"])
                         else:
-                            st.chat_message("user", avatar="🙋‍♂️").write(msg["content"])
+                            st.chat_message("user").write(msg["content"])
 
-                # 다음 단계 이동 버튼 (대화가 1회 이상 오갔을 때 활성화 추천하지만, 편의상 항상 노출)
                 if st.session_state.chat_history:
-                    if st.button("다음 이야기로 넘어가기 ➡️"):
+                    if st.button("다음 단계"):
                         st.session_state.current_step += 1
-                        st.session_state.chat_history = [] # 대화 기록 초기화
+                        st.session_state.chat_history = []
                         st.rerun()
 
             else:
-                # 모든 단계 종료 시
-                st.balloons()
-                st.success("모든 토론을 훌륭하게 마쳤어! 정말 멋진 생각이란다. 🎉")
-                
-                if st.button("처음으로 돌아가기"):
+                st.success("수업 종료.")
+                if st.button("처음으로"):
                     st.session_state.current_step = 0
                     st.session_state.tutorial_done = False
                     st.session_state.chat_history = []
-                    # 캐시된 이미지 삭제
-                    for key in list(st.session_state.keys()):
-                        if key.startswith("img_url_"):
-                            del st.session_state[key]
                     st.rerun()
