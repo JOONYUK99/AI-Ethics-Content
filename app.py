@@ -16,6 +16,14 @@ st.set_page_config(page_title="AI 윤리 교육", page_icon="🤖", layout="wide
 TEXT_MODEL = "gpt-4o"
 IMAGE_MODEL = "dall-e-3"
 
+# 이미지에 글자(영어/한글 포함) 나오지 않게 강제
+NO_TEXT_IMAGE_PREFIX = (
+    "Minimalist, flat design illustration, educational context. "
+    "ABSOLUTELY NO TEXT: no words, no letters, no numbers, no captions, no subtitles, "
+    "no watermarks, no logos, no signs, no posters with writing. "
+    "Only 그림/도형/사물. "
+)
+
 # =========================================================
 # 3) OpenAI client
 # =========================================================
@@ -165,13 +173,13 @@ tags 후보:
     return {"tags": tags, "summary": summary, "feedback": fb}
 
 @st.cache_data(show_spinner=False)
-def generate_image_bytes_cached(prompt: str, image_model: str):
+def generate_image_bytes_cached(user_prompt: str, image_model: str):
     """
-    Returns image bytes reliably:
-    1) try b64_json
-    2) fallback to url and download
+    이미지 bytes 반환.
+    - 글자(영어/한글) 나오지 않도록 강제 프리픽스 추가
+    - b64_json 우선, 실패 시 url 다운로드
     """
-    full_prompt = f"Minimalist, flat design illustration, educational context: {prompt}"
+    full_prompt = f"{NO_TEXT_IMAGE_PREFIX}{user_prompt}"
 
     # 1) b64_json
     try:
@@ -207,7 +215,7 @@ def generate_image_bytes_cached(prompt: str, image_model: str):
 
 def compute_report(logs):
     tag_counts = {}
-    step_choice_counts = {}  # {step: {choice: count}}
+    step_choice_counts = {}
     for row in logs:
         tags = row.get("tags", [])
         if isinstance(tags, list):
@@ -223,8 +231,12 @@ def compute_report(logs):
     return tag_counts, step_choice_counts
 
 def clear_generated_images_from_session():
-    # 시나리오 자동 이미지 / 학생 제작 이미지 키 제거
-    to_del = [k for k in st.session_state.keys() if str(k).startswith("img_bytes_") or str(k).startswith("user_img_bytes_")]
+    to_del = [
+        k for k in st.session_state.keys()
+        if str(k).startswith("img_bytes_")
+        or str(k).startswith("user_img_bytes_")
+        or str(k).startswith("tutorial_img_bytes")
+    ]
     for k in to_del:
         del st.session_state[k]
 
@@ -243,64 +255,106 @@ def reset_student_progress(keep_logs: bool = True):
     if not keep_logs:
         st.session_state.logs = []
 
-def load_example_lesson_copyright():
+def generate_copyright_example_lesson():
     """
-    예시 수업: 저작권 + 생성형 AI 이미지 제작 + 권리/책임 토론
-    - 하드코딩: 예시 버튼 누르면 항상 동일한 수업 생성
+    저작권 예시 수업을 '요구 흐름'대로 생성
+    - 학생이 프롬프트로 이미지를 출력하게 되는 상황 부여
+    - 그 이미지의 저작권/사용권/책임이 누구에게 있는지 토론 흐름
+    - JSON으로 topic/analysis/teacher_guide/scenario 생성
+    실패 시 하드코딩 예시로 fallback
     """
-    topic = "저작권과 생성형 AI 이미지: 누가 저작권자일까?"
+    prompt = """
+초등 고학년 대상 '저작권 + 생성형 AI 이미지' 예시 수업 생성.
+
+반드시 JSON만 출력.
+키:
+- topic: 문자열
+- analysis: 개조식 문자열(핵심가치/교과연계/목표/핵심질문 포함)
+- teacher_guide: 개조식 문자열(도입-활동-토론-정리 흐름, 교사용 질문 3개, 간단 평가 기준 포함)
+- scenario: 리스트(길이=3)
+  - 각 원소 키: story, choice_a, choice_b
+
+필수 흐름(시나리오에 반영):
+1) [상황 부여] 학생이 학교 과제/학급 포스터/발표자료를 위해 '프롬프트를 직접 입력해' AI 이미지 1장을 생성함.
+   이어서 질문: "이 이미지의 저작권/사용 권한은 누구에게 있을까?"
+2) 친구/팀원이 그 이미지를 쓰거나 수정해 쓰고 싶어 함(허락/출처표기/용도 제한 이슈).
+3) 축제/스티커 판매/홍보물 등 '상업적 이용' 또는 '공유 범위 확장' 상황(약관/규정 확인, 대체자료 고려).
+
+조건:
+- 폭력/공포 배제
+- 선택지는 가치 충돌이 명확(책임 vs 편의, 공정 vs 이익 등)
+- 법 조항 단정 금지(“국가마다 다를 수 있음/약관 확인 필요” 관점으로 표현)
+"""
+    data = ask_gpt_json_object(prompt)
+    ok = (
+        isinstance(data, dict)
+        and isinstance(data.get("topic"), str)
+        and isinstance(data.get("analysis"), str)
+        and isinstance(data.get("teacher_guide"), str)
+        and isinstance(data.get("scenario"), list)
+    )
+    if ok:
+        # scenario sanitize
+        cleaned = []
+        for s in data["scenario"][:3]:
+            if isinstance(s, dict) and all(k in s for k in ("story", "choice_a", "choice_b")):
+                cleaned.append({
+                    "story": str(s.get("story", "")).strip(),
+                    "choice_a": str(s.get("choice_a", "")).strip(),
+                    "choice_b": str(s.get("choice_b", "")).strip(),
+                })
+        if len(cleaned) == 3:
+            return data["topic"].strip(), data["analysis"].strip(), {"scenario": cleaned}, data["teacher_guide"].strip()
+
+    # fallback (요구 흐름을 만족하는 고정 예시)
+    topic = "저작권과 생성형 AI 이미지: 이 그림의 권리는 누구에게?"
     analysis = "\n".join([
-        "- 핵심 가치: 책임, 공정성, 투명성, 존엄성",
-        "- 교과 연계: 실과(정보/디지털 활용), 도덕(권리와 책임, 배려, 공정)",
+        "- 핵심 가치: 책임, 공정성, 투명성",
+        "- 교과 연계: 도덕(권리/책임), 실과(디지털 자료 활용)",
         "- 목표:",
-        "  - 생성형 AI로 만든 이미지의 '권리/책임' 쟁점 이해",
-        "  - 프롬프트 작성(제작 과정)과 출처/약관 확인 습관화",
-        "  - 친구/학교 공동체에서의 사용 허락·표기·공정한 사용 원칙 토론",
+        "  - 프롬프트로 만든 이미지의 권리/사용 이슈를 약관/규칙 관점으로 설명",
+        "  - 허락·출처표기·용도 구분(과제/공유/판매) 판단",
         "- 핵심 질문:",
-        "  - AI가 만든 이미지는 '누가' 만든 것인가?",
-        "  - 프롬프트 작성자는 저작권자일까, 사용자일까, 플랫폼일까?",
-        "  - 학교 과제/포스터/굿즈 판매처럼 '사용 목적'이 바뀌면 기준도 달라질까?"
+        "  - 프롬프트를 쓴 학생이 ‘저작권자’라고 말할 수 있을까?",
+        "  - 플랫폼 약관/학교 규칙 확인이 왜 필요할까?",
+        "  - 친구가 쓰거나 판매할 때 기준이 왜 달라질까?"
     ])
-
-    scenario = [
-        {
-            "story": "너는 학급 행사 포스터를 만들기 위해 생성형 AI로 그림을 만들었다. 프롬프트를 직접 작성했고, 결과 이미지는 멋지게 나왔다. 친구가 '이 그림 저작권은 네 거야?'라고 묻는다.",
-            "choice_a": "내가 프롬프트를 썼으니 저작권은 100% 내 것이라고 말한다.",
-            "choice_b": "저작권이 누구에게 있는지 확실치 않으니, 플랫폼/약관/규칙을 확인하고 사용 방식(표기 포함)을 정한다."
-        },
-        {
-            "story": "친구가 네가 만든 AI 이미지를 자기 발표 자료에 쓰고 싶다고 한다. 출처 표기를 할지, 너에게 허락을 받아야 하는지 고민한다.",
-            "choice_a": "조건부 허락: 출처(프롬프트/도구) 표기 + 용도 제한(발표만)으로 허락한다.",
-            "choice_b": "허락하지 않는다: 내 이미지이니 다른 사람이 쓰면 안 된다고 말한다."
-        },
-        {
-            "story": "학교 축제에서 포스터 이미지를 이용해 스티커를 만들어 판매하자는 의견이 나왔다. 그런데 AI 이미지의 상업적 사용이 가능한지(약관), 원본 데이터/권리 문제가 없는지 확신이 없다.",
-            "choice_a": "바로 판매한다: 이미지를 만들었으니 문제 없다고 판단한다.",
-            "choice_b": "판매 보류: 약관/규정 확인 후, 필요하면 직접 그린 그림이나 라이선스가 명확한 자료로 대체한다."
-        }
-    ]
-
     teacher_guide = "\n".join([
         "수업 흐름(예시)",
-        "1) 도입(5분): 'AI가 만든 그림의 저작권은 누구에게?' 질문 던지기",
-        "2) 제작 활동(10~15분): 학생이 프롬프트 작성 → 이미지 생성 → 결과 공유",
-        "   - 규칙: 개인정보/실존 인물/상표 로고/폭력적 표현 지양",
-        "3) 딜레마 토론(15~20분): 3단계 시나리오를 순서대로 진행",
-        "   - 토론 관점: 창작성(프롬프트 기여), 플랫폼 약관, 출처표기, 사용 목적(과제/공유/상업), 공동체 규칙",
-        "4) 정리(5분): 개인 결론 1문장 + 다음 행동 1개(예: 약관 확인, 출처 표기, 허락 받기)",
+        "1) 도입(5분): 'AI가 만든 그림의 권리는 누구에게?' 질문",
+        "2) 활동(10분): 학생이 프롬프트 입력 → 이미지 1장 생성(글자 없는 그림만)",
+        "3) 토론(20분): 아래 3단계 딜레마 순서대로 선택+이유 말하기",
+        "4) 정리(5분): 다음 행동 1개(약관 확인/출처 표기/허락 받기 등)",
         "",
         "교사용 질문(예시)",
-        "- 프롬프트 작성은 '창작'인가? 어느 정도면 창작 기여가 있다고 볼까?",
-        "- 친구가 쓸 때 '허락'과 '출처표기'는 왜 필요한가?",
-        "- 과제 제출과 판매(상업적 이용)는 왜 다르게 봐야 하는가?",
+        "- 프롬프트 작성은 어떤 점에서 ‘창작 기여’일까?",
+        "- 허락과 출처표기는 왜 분리해서 생각해야 할까?",
+        "- 판매/홍보처럼 목적이 바뀌면 왜 더 신중해야 할까?",
         "",
         "평가(간단)",
-        "- 이유의 근거성(규칙/약관/공정/책임 관점)",
+        "- 근거 제시(규칙/약관/공정/책임 관점)",
         "- 타인 권리 고려(허락/표기/용도 제한)",
-        "- 대안 제시(직접 제작, 라이선스 명확 자료 사용, 확인 후 사용)"
+        "- 대안 제시(직접 제작/라이선스 명확 자료 사용/확인 후 사용)"
     ])
-
+    scenario = [
+        {
+            "story": "학교 과제로 '학급 발표자료 표지'가 필요해 프롬프트를 직접 입력해 AI 이미지 1장을 만들었다. 친구가 묻는다: '이 이미지 저작권(사용 권한)은 누구에게 있어?'",
+            "choice_a": "내가 프롬프트를 썼으니 내 것. 마음대로 써도 된다고 말한다.",
+            "choice_b": "확실치 않음. 도구 약관/학교 규칙을 확인하고, 출처 표기와 사용 범위를 정한다."
+        },
+        {
+            "story": "친구가 그 이미지를 자기 발표 자료에 쓰고 싶다고 한다. 일부 수정도 하겠다고 한다. 허락/출처표기/용도 제한을 어떻게 할까?",
+            "choice_a": "조건부 허락: 출처(도구/프롬프트) 표기 + 용도(발표만) 제한 후 허락한다.",
+            "choice_b": "허락하지 않는다: 내 이미지이니 다른 사람이 수정/사용하면 안 된다고 말한다."
+        },
+        {
+            "story": "축제 때 그 이미지를 스티커로 만들어 판매하자는 의견이 나왔다. 상업적 이용이 가능한지(약관/규정) 확신이 없다.",
+            "choice_a": "바로 판매한다: 어차피 우리가 만든 이미지라고 판단한다.",
+            "choice_b": "판매 보류: 약관/규정 확인 후, 필요하면 직접 그린 그림이나 라이선스가 명확한 자료로 대체한다."
+        },
+    ]
     return topic, analysis, {"scenario": scenario}, teacher_guide
+
 
 # =========================================================
 # 6) Session state init
@@ -391,7 +445,6 @@ if mode == "👨‍🏫 교사용":
     st.header("🛠️ 수업 생성")
 
     input_topic = st.text_input("주제 입력", value=st.session_state.topic, key="teacher_topic_input")
-
     colA, colB, colC = st.columns([1, 1, 1])
 
     with colA:
@@ -414,8 +467,8 @@ if mode == "👨‍🏫 교사용":
 
     with colB:
         if st.button("예시 수업 생성(저작권)", key="teacher_example_copyright"):
-            with st.spinner("예시 수업 로딩..."):
-                topic, analysis, scenario_obj, guide = load_example_lesson_copyright()
+            with st.spinner("예시 수업 생성 중..."):
+                topic, analysis, scenario_obj, guide = generate_copyright_example_lesson()
                 st.session_state.topic = topic
                 st.session_state.analysis = analysis
                 st.session_state.scenario = scenario_obj
@@ -444,7 +497,7 @@ if mode == "👨‍🏫 교사용":
 
     if st.session_state.teacher_guide:
         st.divider()
-        with st.expander("📌 교사용 수업 안내(예시)", expanded=True):
+        with st.expander("📌 교사용 수업 안내(저작권 예시)", expanded=True):
             st.text(st.session_state.teacher_guide)
 
     scenario_data = st.session_state.scenario.get("scenario", [])
@@ -553,29 +606,25 @@ else:
         st.header("🎒 연습")
         st.progress(st.session_state.tutorial_step / 3)
 
-        # 1) choice practice
         if st.session_state.tutorial_step == 1:
             st.subheader("1. 선택 연습")
-            st.caption("목표: A/B 중 하나를 선택해보기(연습용)")
+            st.caption("목표: A/B 중 하나 선택")
 
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("A 선택", key="tut_choose_a"):
                     st.session_state.tutorial_choice = "A"
-                    st.toast("선택: A")
                     st.session_state.tutorial_step = 2
                     st.rerun()
             with c2:
                 if st.button("B 선택", key="tut_choose_b"):
                     st.session_state.tutorial_choice = "B"
-                    st.toast("선택: B")
                     st.session_state.tutorial_step = 2
                     st.rerun()
 
-        # 2) input practice
         elif st.session_state.tutorial_step == 2:
             st.subheader("2. 입력 연습")
-            st.caption("목표: 간단한 문장 입력 후 전송")
+            st.caption("목표: 이유 1문장 입력 후 전송")
 
             st.write(f"방금 선택: {st.session_state.tutorial_choice or '미선택'}")
             st.session_state.tutorial_reason = st.text_area(
@@ -589,7 +638,6 @@ else:
             with c1:
                 if st.button("전송", key="tut_send"):
                     if st.session_state.tutorial_reason.strip():
-                        st.toast("입력 완료")
                         st.session_state.tutorial_step = 3
                         st.rerun()
                     else:
@@ -599,15 +647,14 @@ else:
                     st.session_state.tutorial_step = 1
                     st.rerun()
 
-        # 3) prompt -> image test
         elif st.session_state.tutorial_step == 3:
             st.subheader("3. 프롬프트 이미지 테스트")
-            st.caption("목표: 간단한 프롬프트 입력 → 이미지 생성 확인")
+            st.caption("목표: 프롬프트 입력 → 이미지 생성 확인 (글자 없이 그림만 나오게)")
 
             st.session_state.tutorial_img_prompt = st.text_input(
                 "이미지 프롬프트(연습)",
                 value=st.session_state.tutorial_img_prompt,
-                placeholder="예: robot teacher in classroom",
+                placeholder="예: cute robot teacher and students in classroom",
                 key="tut_img_prompt",
             )
 
@@ -621,12 +668,12 @@ else:
                                 IMAGE_MODEL,
                             )
                         if not st.session_state.tutorial_img_bytes:
-                            st.error("이미지 생성 실패(텍스트만 진행 가능).")
+                            st.error("이미지 생성 실패.")
                     else:
                         st.warning("프롬프트 입력 필요.")
             with c2:
                 if st.button("예시 넣기", key="tut_example"):
-                    st.session_state.tutorial_img_prompt = "A student learning AI ethics with a robot tutor in a classroom"
+                    st.session_state.tutorial_img_prompt = "a friendly robot and a child studying with books, no text"
                     st.rerun()
             with c3:
                 if st.button("이전", key="tut_back_2"):
@@ -635,7 +682,6 @@ else:
 
             if st.session_state.tutorial_img_bytes:
                 st.image(st.session_state.tutorial_img_bytes, width=360)
-
                 if st.button("수업 입장", key="tut_enter"):
                     st.session_state.tutorial_done = True
                     st.rerun()
@@ -680,7 +726,7 @@ else:
                 st.progress((idx + 1) / total)
                 st.subheader(f"단계 {idx+1}")
 
-                # ✅ 항상 이미지 표시: 토글 제거, 항상 생성/표시
+                # ✅ 항상 이미지 표시 (토글 제거)
                 img_key = f"img_bytes_{idx}"
                 if img_key not in st.session_state:
                     with st.spinner("이미지 생성..."):
@@ -695,20 +741,20 @@ else:
 
                 st.info(data.get("story", "내용 없음"))
 
-                # ✅ 저작권 예시 수업일 때: 학생이 직접 이미지 제작 활동
+                # ✅ 저작권 수업: '상황 부여 → 학생이 프롬프트로 이미지 출력 → 저작권 토론' 활동을 명시
                 extra_context = ""
                 if st.session_state.lesson_type == "copyright":
                     st.divider()
-                    st.subheader("🎨 이미지 제작 활동(학생)")
+                    st.subheader("🎨 프롬프트로 이미지 제작")
+                    st.caption("규칙: 글자/문장/로고 없이 그림만 나오게 프롬프트 작성")
 
-                    st.caption("간단 프롬프트 작성 → 이미지 생성 → '이 이미지의 저작권/사용 권한' 토론 준비")
                     user_prompt_key = f"user_img_prompt_{idx}"
                     user_img_key = f"user_img_bytes_{idx}"
 
                     user_prompt = st.text_input(
-                        "내 이미지 프롬프트",
+                        "내 프롬프트",
                         value=st.session_state.get(user_prompt_key, ""),
-                        placeholder="예: cute eco poster style illustration",
+                        placeholder="예: colorful mascot character holding a paintbrush, no text",
                         key=user_prompt_key,
                     )
 
@@ -717,7 +763,10 @@ else:
                         if st.button("내 이미지 생성", key=f"user_img_gen_{idx}"):
                             if user_prompt.strip():
                                 with st.spinner("내 이미지 생성..."):
-                                    st.session_state[user_img_key] = generate_image_bytes_cached(user_prompt.strip(), IMAGE_MODEL)
+                                    st.session_state[user_img_key] = generate_image_bytes_cached(
+                                        user_prompt.strip(),
+                                        IMAGE_MODEL
+                                    )
                             else:
                                 st.warning("프롬프트 입력 필요.")
                     with c2:
@@ -727,11 +776,10 @@ else:
                             st.rerun()
 
                     if st.session_state.get(user_img_key):
-                        st.image(st.session_state[user_img_key], caption="내가 만든 이미지(연습/토론용)")
-
-                    # 피드백 프롬프트에 추가 컨텍스트로 포함
-                    if user_prompt.strip():
-                        extra_context = f"학생 제작 프롬프트: {user_prompt.strip()}"
+                        st.image(st.session_state[user_img_key], caption="내가 만든 이미지(토론 기준 이미지)")
+                        extra_context = f"학생이 생성에 사용한 프롬프트: {user_prompt.strip()}"
+                    else:
+                        extra_context = "학생이 이미지 생성(프롬프트 입력) 후 토론한다고 가정."
 
                 with st.form(f"form_{idx}"):
                     sel = st.radio(
@@ -762,13 +810,11 @@ else:
                                 st.write("요약:", fb["summary"])
                             st.write("피드백:", fb.get("feedback", "응답 불가."))
 
-                        # chat history (display)
                         st.session_state.chat_history.append({"role": "user", "content": f"[{sel}] {reason}"})
                         st.session_state.chat_history.append(
                             {"role": "assistant", "content": fb.get("feedback", "응답 불가.")}
                         )
 
-                        # logs
                         st.session_state.logs.append(
                             {
                                 "timestamp": now_str(),
