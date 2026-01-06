@@ -453,52 +453,101 @@ if mode == "👨‍🏫 교사용":
 # =========================
 elif mode == "🙋‍♂️ 학생용":
 
-    # 튜토리얼
-    if not st.session_state.tutorial_done:
-        st.header("🎒 연습")
-        st.progress(st.session_state.tutorial_step / 3)
+   # 튜토리얼
+if not st.session_state.tutorial_done:
+    st.header("🎒 연습")
+    st.progress(st.session_state.tutorial_step / 3)
 
-        if st.session_state.tutorial_step == 1:
-            st.subheader("1. 선택")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("A: 탕수육 찍먹"):
-                    st.toast("선택: 찍먹")
-                    st.session_state.tutorial_step = 2
-                    st.rerun()
-            with c2:
-                if st.button("B: 탕수육 부먹"):
-                    st.toast("선택: 부먹")
-                    st.session_state.tutorial_step = 2
-                    st.rerun()
+    # -------------------------
+    # 1) 선택 연습
+    # -------------------------
+    if st.session_state.tutorial_step == 1:
+        st.subheader("1. 선택 연습")
+        st.caption("목표: 선택 버튼을 눌러보고, 다음 단계로 넘어가기")
 
-        elif st.session_state.tutorial_step == 2:
-            st.subheader("2. 입력")
-            t_input = st.text_input("입력창", key="tutorial_input")
-            if st.button("전송"):
-                if t_input:
-                    st.toast("완료")
-                    st.session_state.tutorial_step = 3
-                    st.rerun()
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("A 선택", key="tutorial_choose_a"):
+                st.session_state.tutorial_choice = "A"
+                st.toast("선택: A")
+                st.session_state.tutorial_step = 2
+                st.rerun()
 
-        elif st.session_state.tutorial_step == 3:
-            st.subheader("3. 생성")
+        with c2:
+            if st.button("B 선택", key="tutorial_choose_b"):
+                st.session_state.tutorial_choice = "B"
+                st.toast("선택: B")
+                st.session_state.tutorial_step = 2
+                st.rerun()
 
-            if st.button("테스트 이미지 생성"):
-                with st.spinner("생성..."):
-                    b64 = generate_image_b64_cached("Robot teacher", st.session_state.image_model)
-                    st.session_state.tutorial_img_b64 = b64
+    # -------------------------
+    # 2) 입력 연습
+    # -------------------------
+    elif st.session_state.tutorial_step == 2:
+        st.subheader("2. 입력 연습")
+        st.caption("목표: 간단한 이유를 입력하고 전송해보기")
 
-            if st.session_state.tutorial_img_b64:
-                img_bytes = b64_to_bytes(st.session_state.tutorial_img_b64)
-                if img_bytes:
-                    st.image(img_bytes, width=300)
+        st.write(f"방금 선택: {st.session_state.tutorial_choice or '미선택'}")
+
+        st.session_state.tutorial_reason = st.text_area(
+            "이유(연습)",
+            value=st.session_state.tutorial_reason,
+            placeholder="예: A를 선택한 이유는 ...",
+            key="tutorial_reason_area"
+        )
+
+        if st.button("전송", key="tutorial_send_reason"):
+            if st.session_state.tutorial_reason.strip():
+                st.toast("입력 완료")
+                st.session_state.tutorial_step = 3
+                st.rerun()
+            else:
+                st.warning("이유 입력 필요.")
+
+    # -------------------------
+    # 3) 이미지 생성 테스트
+    # -------------------------
+    elif st.session_state.tutorial_step == 3:
+        st.subheader("3. 이미지 생성 테스트")
+        st.caption("목표: 간단한 프롬프트를 입력하고 이미지가 생성되는지 확인")
+
+        st.session_state.tutorial_img_prompt = st.text_input(
+            "이미지 프롬프트(연습)",
+            value=st.session_state.tutorial_img_prompt,
+            placeholder="예: robot teacher in classroom",
+            key="tutorial_img_prompt_input"
+        )
+
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("이미지 생성", key="tutorial_gen_image"):
+                if st.session_state.tutorial_img_prompt.strip():
+                    with st.spinner("생성..."):
+                        b64 = generate_image_b64_cached(
+                            st.session_state.tutorial_img_prompt.strip(),
+                            st.session_state.image_model
+                        )
+                        st.session_state.tutorial_img_b64 = b64
+                    if not st.session_state.tutorial_img_b64:
+                        st.error("이미지 생성 실패(텍스트만 진행 가능).")
                 else:
-                    st.info("이미지 표시 불가.")
+                    st.warning("프롬프트 입력 필요.")
 
-                if st.button("수업 입장"):
-                    st.session_state.tutorial_done = True
-                    st.rerun()
+        with col2:
+            if st.button("프롬프트 예시 넣기", key="tutorial_prompt_example"):
+                st.session_state.tutorial_img_prompt = "A student discussing AI ethics with a robot tutor"
+                st.rerun()
+
+        if st.session_state.tutorial_img_b64:
+            img_bytes = b64_to_bytes(st.session_state.tutorial_img_b64)
+            if img_bytes:
+                st.image(img_bytes, width=360)
+            else:
+                st.info("이미지 표시 불가.")
+
+            if st.button("수업 입장", key="tutorial_enter_class"):
+                st.session_state.tutorial_done = True
+                st.rerun()
 
     # 실전 수업
     else:
@@ -622,3 +671,4 @@ elif mode == "🙋‍♂️ 학생용":
                         st.session_state.current_step += 1
                         st.session_state.chat_history = []
                         st.rerun()
+
