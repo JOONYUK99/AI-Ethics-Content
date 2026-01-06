@@ -49,6 +49,10 @@ SYSTEM_PERSONA = """
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+def _clip(s: str, max_len: int = 900) -> str:
+    s = (s or "").strip()
+    return s[:max_len] + ("…" if len(s) > max_len else "")
+
 def safe_json_load(s: str):
     if not s:
         return None
@@ -60,7 +64,7 @@ def safe_json_load(s: str):
             a = s.find("{")
             b = s.rfind("}")
             if a != -1 and b != -1 and b > a:
-                return json.loads(s[a:b+1])
+                return json.loads(s[a:b + 1])
         except Exception:
             return None
     return None
@@ -96,15 +100,11 @@ def ask_gpt_json_object(prompt: str) -> dict:
     except Exception:
         return {}
 
-def _clip(s: str, max_len: int = 900) -> str:
-    s = (s or "").strip()
-    return s[:max_len] + ("…" if len(s) > max_len else "")
-
 def normalize_steps(raw_steps):
     """
     Supports:
     - legacy dilemma steps: {"story","choice_a","choice_b"}
-    - new mixed steps:
+    - mixed steps:
       - image_task: {"type":"image_task","story","prompt_goal","question"}
       - dilemma: {"type":"dilemma","story","choice_a","choice_b"}
       - discussion: {"type":"discussion","story","question"}
@@ -155,14 +155,19 @@ def normalize_steps(raw_steps):
     return steps
 
 # =========================================================
-# 6) Lesson generation
+# 6) Lesson generation (교사용 가이드라인 반영)
 # =========================================================
-def generate_scenario_3steps(topic: str) -> dict:
+def generate_scenario_3steps(topic: str, teacher_guideline_internal: str = "") -> dict:
+    tg = _clip(teacher_guideline_internal, 900)
     prompt = f"""
 주제 '{topic}'의 3단계 딜레마 시나리오를 생성.
 반드시 JSON만 출력.
 최상위 키: scenario (리스트, 길이=3)
 각 원소 키: story, choice_a, choice_b
+
+[교사 운영 가이드라인(반영)]
+{tg if tg else "- 없음"}
+
 조건:
 - 초등 고학년 수준
 - 과도한 폭력/공포 배제
@@ -172,13 +177,14 @@ def generate_scenario_3steps(topic: str) -> dict:
     steps = normalize_steps(data.get("scenario", []))
     return {"scenario": steps}
 
-def generate_mixed_lesson(topic: str) -> tuple[str, str, dict, str]:
-    """
-    Mixed lesson: includes at least one image_task + dilemmas/discussion.
-    """
+def generate_mixed_lesson(topic: str, teacher_guideline_internal: str = "") -> tuple[str, str, dict, str]:
+    tg = _clip(teacher_guideline_internal, 900)
     prompt = f"""
 초등 고학년 대상 AI 윤리 수업(혼합형) 생성.
 주제: '{topic}'
+
+[교사 운영 가이드라인(반영)]
+{tg if tg else "- 없음"}
 
 반드시 JSON만 출력.
 키:
@@ -210,22 +216,19 @@ type="image_task" | "dilemma" | "discussion"
             "type": "image_task",
             "story": "프롬프트를 입력해 수업 주제와 관련된 이미지를 1장 생성한다.",
             "prompt_goal": "수업 주제를 상징하는 그림 만들기",
-            "prompt_hint": "사람/사물/배경 3요소로 묘사(글자 없음)",
-            "question": "이 활동에서 가장 중요한 책임은 무엇인가?",
+            "prompt_hint": "사람/사물/배경 3요소(글자 없음)",
+            "question": "이 활동에서 중요한 점 1개를 말하라.",
         }] + steps)
 
     return t, analysis, {"scenario": steps}, guide
 
-def generate_copyright_lesson() -> tuple[str, str, dict, str]:
-    """
-    Required flow:
-    1) image_task (prompt -> image -> "who owns/controls rights?")
-    2) dilemma
-    3) dilemma
-    4) discussion (class rules)
-    """
-    prompt = """
+def generate_copyright_lesson(teacher_guideline_internal: str = "") -> tuple[str, str, dict, str]:
+    tg = _clip(teacher_guideline_internal, 900)
+    prompt = f"""
 초등 고학년 대상 '저작권 + 생성형 AI 이미지' 수업 생성.
+
+[교사 운영 가이드라인(반영)]
+{tg if tg else "- 없음"}
 
 반드시 JSON만 출력.
 키:
@@ -256,6 +259,7 @@ def generate_copyright_lesson() -> tuple[str, str, dict, str]:
     guide = str(data.get("teacher_guide", "")).strip()
     steps = normalize_steps(data.get("scenario", []))
 
+    # Hard fallback if malformed
     if len(steps) < 4 or steps[0].get("type") != "image_task":
         steps = [
             {
@@ -303,24 +307,19 @@ def generate_copyright_lesson() -> tuple[str, str, dict, str]:
     return topic, analysis, {"scenario": steps}, guide
 
 # =========================================================
-# 7) Feedback (teacher opinion reflected)
+# 7) Feedback (교사 기준 + 교사 가이드라인 반영)
 # =========================================================
 def get_teacher_feedback_context() -> str:
-    """
-    Teacher can write their viewpoint/rubric. This will be injected into the LLM prompt.
-    """
     ctx = (st.session_state.get("teacher_feedback_context") or "").strip()
-    if not ctx:
-        return ""
-    # Keep it short to avoid prompt bloat
-    return _clip(ctx, 900)
+    return _clip(ctx, 900) if ctx else ""
+
+def get_teacher_guideline_internal() -> str:
+    g = (st.session_state.get("teacher_guideline_internal") or "").strip()
+    return _clip(g, 900) if g else ""
 
 def feedback_with_tags(step_story: str, answer_text: str, extra_context: str = "", mode: str = "generic") -> dict:
-    """
-    - Includes teacher feedback context so responses reflect teacher viewpoint/rubric.
-    - Avoids legal certainty; encourages terms/policy checking when copyright mode.
-    """
     teacher_ctx = get_teacher_feedback_context()
+    teacher_guide_internal = get_teacher_guideline_internal()
 
     if mode == "copyright":
         tag_candidates = "저작권, 공정이용, 출처표기, 허락, 책임, 투명성, 공정성"
@@ -332,11 +331,14 @@ def feedback_with_tags(step_story: str, answer_text: str, extra_context: str = "
     prompt = f"""
 상황/활동: {step_story}
 
-[교사 관점/평가기준]
-{teacher_ctx if teacher_ctx else "- (교사 입력 없음: 일반 기준 적용)"}
+[교사 관점/평가기준(반영)]
+{teacher_ctx if teacher_ctx else "- (교사 입력 없음)"}
+
+[교사 운영 가이드라인(반영)]
+{teacher_guide_internal if teacher_guide_internal else "- (교사 입력 없음)"}
 
 [추가 맥락]
-{extra_context}
+{_clip(extra_context, 700)}
 
 [학생 답]
 {answer_text}
@@ -347,7 +349,7 @@ def feedback_with_tags(step_story: str, answer_text: str, extra_context: str = "
 키:
 - tags: 문자열 리스트(최대 3개)
 - summary: 1줄 요약
-- feedback: 단답형 피드백(핵심만, 교사 관점/기준을 반영)
+- feedback: 단답형 피드백(핵심만, 교사 기준/가이드라인을 반영)
 
 tags 후보:
 {tag_candidates}
@@ -419,7 +421,8 @@ def compute_report(logs):
     return tag_counts, step_type_counts
 
 def clear_generated_images_from_session():
-    to_del = [k for k in st.session_state.keys() if str(k).startswith("img_bytes_") or str(k).startswith("user_img_bytes_")]
+    to_del = [k for k in st.session_state.keys()
+              if str(k).startswith("img_bytes_") or str(k).startswith("user_img_bytes_")]
     for k in to_del:
         del st.session_state[k]
 
@@ -462,8 +465,13 @@ default_keys = {
     "lesson_type": "general",      # general | copyright
     "teacher_guide": "",
 
-    # ✅ teacher viewpoint/rubric for feedback
+    # ✅ 교사 피드백 기준(피드백 프롬프트에 반영)
     "teacher_feedback_context": "",
+
+    # ✅ 교사용 가이드라인(운영) + 학생 공개용 가이드
+    "teacher_guideline_internal": "",
+    "teacher_guideline_student": "",
+    "show_student_guideline": True,
 
     # tutorial
     "tutorial_choice": "",
@@ -533,18 +541,44 @@ if mode == "🙋‍♂️ 학생용":
 if mode == "👨‍🏫 교사용":
     st.header("🛠️ 수업 생성")
 
-    # ✅ Teacher feedback viewpoint/rubric
-    with st.expander("🧑‍🏫 교사 피드백 기준/관점(학생 피드백에 반영)", expanded=True):
-        st.caption("예: 강조할 원칙(출처표기/허락/약관확인), 감점/가점 기준, 수업 목표 문장 등")
+    # ✅ 교사용 가이드라인 입력(운영용 + 학생 공개용)
+    with st.expander("📘 교사용 가이드라인(직접 입력)", expanded=True):
+        st.caption("운영 멘트/시간배분/질문 순서/오해 포인트/평가 체크리스트 등")
+        st.session_state.teacher_guideline_internal = st.text_area(
+            "교사용 운영 가이드(학생 비공개)",
+            value=st.session_state.teacher_guideline_internal,
+            height=130,
+            placeholder="예) 1) 약관/규칙 확인을 먼저 말하면 가점  2) 허락/출처표기/용도 제한을 구분  3) 상업적 이용은 보류/대체안 제시",
+            key="teacher_guideline_internal_input",
+        )
+
+        st.session_state.show_student_guideline = st.checkbox(
+            "학생에게 가이드라인(요약)을 공개",
+            value=st.session_state.show_student_guideline,
+            key="show_student_guideline_chk",
+        )
+
+        st.session_state.teacher_guideline_student = st.text_area(
+            "학생 공개용 가이드(짧게)",
+            value=st.session_state.teacher_guideline_student,
+            height=110,
+            placeholder="예) 1) 프롬프트는 구체적으로 2) 글자/로고 금지 3) 허락·출처표기·사용목적을 구분해서 답하기",
+            key="teacher_guideline_student_input",
+        )
+
+    # ✅ 교사 피드백 기준/관점
+    with st.expander("🧑‍🏫 교사 피드백 기준/관점(학생 피드백에 반영)", expanded=False):
+        st.caption("학생 제출 피드백 생성 시 반영됨(점수화가 아니라 ‘관점/기준’ 제공)")
         st.session_state.teacher_feedback_context = st.text_area(
             "교사 기준 입력",
             value=st.session_state.teacher_feedback_context,
-            height=140,
-            placeholder="예) 저작권 수업: 1) 약관/학교 규칙 확인을 우선 언급하면 가점  2) 출처표기/허락/용도 제한을 구분하면 가점  3) 상업적 이용은 보류/대체안을 제시하면 가점",
+            height=120,
+            placeholder="예) 칭찬은 근거 1개 포함, 보완은 다음 행동 1개로 제시",
             key="teacher_feedback_context_input",
         )
 
     input_topic = st.text_input("주제 입력", value=st.session_state.topic, key="teacher_topic_input")
+
     colA, colB, colC, colD = st.columns([1, 1, 1, 1])
 
     with colA:
@@ -556,7 +590,10 @@ if mode == "👨‍🏫 교사용":
                     st.session_state.topic = input_topic.strip()
                     st.session_state.lesson_type = "general"
                     st.session_state.teacher_guide = ""
-                    st.session_state.scenario = generate_scenario_3steps(st.session_state.topic)
+                    st.session_state.scenario = generate_scenario_3steps(
+                        st.session_state.topic,
+                        teacher_guideline_internal=st.session_state.teacher_guideline_internal
+                    )
                     st.session_state.analysis = ask_gpt_text(
                         f"주제 '{st.session_state.topic}'의 핵심 가치, 교과, 목표를 개조식으로 요약."
                     )
@@ -570,7 +607,10 @@ if mode == "👨‍🏫 교사용":
                 st.warning("주제 필요.")
             else:
                 with st.spinner("혼합 수업 구성 중..."):
-                    t, analysis, scenario_obj, guide = generate_mixed_lesson(input_topic.strip())
+                    t, analysis, scenario_obj, guide = generate_mixed_lesson(
+                        input_topic.strip(),
+                        teacher_guideline_internal=st.session_state.teacher_guideline_internal
+                    )
                     st.session_state.topic = t
                     st.session_state.analysis = analysis
                     st.session_state.scenario = scenario_obj
@@ -583,7 +623,9 @@ if mode == "👨‍🏫 교사용":
     with colC:
         if st.button("예시 수업 생성(저작권)", key="teacher_example_copyright"):
             with st.spinner("저작권 수업 구성 중..."):
-                t, analysis, scenario_obj, guide = generate_copyright_lesson()
+                t, analysis, scenario_obj, guide = generate_copyright_lesson(
+                    teacher_guideline_internal=st.session_state.teacher_guideline_internal
+                )
                 st.session_state.topic = t
                 st.session_state.analysis = analysis
                 st.session_state.scenario = scenario_obj
@@ -593,6 +635,7 @@ if mode == "👨‍🏫 교사용":
                 clear_generated_images_from_session()
                 st.success("예시 수업 생성 완료.")
 
+    # ✅ 패키지 다운로드(학생 공유용)
     with colD:
         if st.session_state.scenario.get("scenario"):
             pack = {
@@ -601,6 +644,9 @@ if mode == "👨‍🏫 교사용":
                 "analysis": st.session_state.analysis,
                 "teacher_guide": st.session_state.teacher_guide,
                 "teacher_feedback_context": st.session_state.teacher_feedback_context,
+                "teacher_guideline_internal": st.session_state.teacher_guideline_internal,
+                "teacher_guideline_student": st.session_state.teacher_guideline_student,
+                "show_student_guideline": st.session_state.show_student_guideline,
                 "scenario": st.session_state.scenario.get("scenario", []),
             }
             st.download_button(
@@ -613,7 +659,7 @@ if mode == "👨‍🏫 교사용":
 
     if st.session_state.teacher_guide:
         st.divider()
-        with st.expander("📌 교사용 수업 안내", expanded=True):
+        with st.expander("📌 교사용 수업 안내(자동 생성)", expanded=True):
             st.text(st.session_state.teacher_guide)
 
     if st.session_state.analysis:
@@ -663,6 +709,34 @@ if mode == "👨‍🏫 교사용":
 # 13) Student mode
 # =========================================================
 else:
+    # ✅ 교사가 만든 패키지 업로드(교사 가이드/피드백 기준 공유)
+    with st.expander("📦 수업 불러오기(교사가 만든 JSON 업로드)", expanded=False):
+        up = st.file_uploader("ethics_class_package.json", type=["json"])
+        if up is not None:
+            try:
+                pack = json.load(up)
+                st.session_state.topic = pack.get("topic", "")
+                st.session_state.lesson_type = pack.get("lesson_type", "general")
+                st.session_state.analysis = pack.get("analysis", "")
+                st.session_state.teacher_guide = pack.get("teacher_guide", "")
+                st.session_state.teacher_feedback_context = pack.get("teacher_feedback_context", "")
+                st.session_state.teacher_guideline_internal = pack.get("teacher_guideline_internal", "")
+                st.session_state.teacher_guideline_student = pack.get("teacher_guideline_student", "")
+                st.session_state.show_student_guideline = bool(pack.get("show_student_guideline", True))
+                st.session_state.scenario = {"scenario": normalize_steps(pack.get("scenario", []))}
+                st.session_state.current_step = 0
+                st.session_state.chat_history = []
+                clear_generated_images_from_session()
+                st.success("수업 로드 완료")
+                st.rerun()
+            except Exception:
+                st.error("JSON 로드 실패")
+
+    # 학생 공개용 가이드라인 표시
+    if st.session_state.show_student_guideline and (st.session_state.teacher_guideline_student or "").strip():
+        with st.expander("📌 수업 가이드", expanded=True):
+            st.write(st.session_state.teacher_guideline_student)
+
     # --------------------------
     # Tutorial
     # --------------------------
@@ -749,7 +823,7 @@ else:
     else:
         steps = st.session_state.scenario.get("scenario", [])
         if not steps:
-            st.warning("데이터 없음. 교사용 탭에서 생성 필요.")
+            st.warning("데이터 없음. 교사용 탭에서 생성(또는 JSON 업로드) 필요.")
             if st.button("새로고침", key="student_refresh"):
                 st.rerun()
         else:
@@ -780,7 +854,7 @@ else:
             else:
                 step = steps[idx]
                 st.progress((idx + 1) / total)
-                st.subheader(f"단계 {idx+1} ({step.get('type','')})")
+                st.subheader(f"단계 {idx + 1} ({step.get('type', '')})")
 
                 # ✅ 항상 시나리오 이미지 표시
                 img_key = f"img_bytes_{idx}"
@@ -796,7 +870,7 @@ else:
                 st.info(step.get("story", "내용 없음"))
 
                 # -------------------------------------------------
-                # A) IMAGE TASK: prompt -> image -> opinion -> feedback
+                # A) IMAGE TASK
                 # -------------------------------------------------
                 if step.get("type") == "image_task":
                     st.divider()
@@ -854,10 +928,8 @@ else:
                             extra_context = ""
                             if user_prompt.strip():
                                 extra_context += f"학생 프롬프트: {user_prompt.strip()}\n"
-                            extra_context = _clip(extra_context, 600)
 
                             mode_hint = "copyright" if st.session_state.lesson_type == "copyright" else "generic"
-
                             with st.spinner("피드백..."):
                                 fb = feedback_with_tags(
                                     step.get("story", ""),
@@ -889,7 +961,6 @@ else:
                                 "tags": fb.get("tags", []),
                                 "summary": fb.get("summary", ""),
                                 "feedback": fb.get("feedback", ""),
-                                "teacher_feedback_context": _clip(st.session_state.teacher_feedback_context, 400),
                             })
 
                     if st.session_state.chat_history:
@@ -922,7 +993,6 @@ else:
                             extra_context = ""
                             if st.session_state.last_student_image_done and st.session_state.last_student_image_prompt:
                                 extra_context = f"이전 활동 프롬프트: {st.session_state.last_student_image_prompt}"
-                            extra_context = _clip(extra_context, 600)
 
                             mode_hint = "copyright" if st.session_state.lesson_type == "copyright" else "generic"
                             with st.spinner("피드백..."):
@@ -956,7 +1026,6 @@ else:
                                 "tags": fb.get("tags", []),
                                 "summary": fb.get("summary", ""),
                                 "feedback": fb.get("feedback", ""),
-                                "teacher_feedback_context": _clip(st.session_state.teacher_feedback_context, 400),
                             })
 
                     if st.session_state.chat_history:
@@ -990,7 +1059,6 @@ else:
                             extra_context = ""
                             if st.session_state.last_student_image_done and st.session_state.last_student_image_prompt:
                                 extra_context = f"학생이 만든 이미지 프롬프트(참고): {st.session_state.last_student_image_prompt}"
-                            extra_context = _clip(extra_context, 600)
 
                             mode_hint = "copyright" if st.session_state.lesson_type == "copyright" else "generic"
                             answer_text = f"선택: {sel}\n이유: {reason.strip()}"
@@ -1027,7 +1095,6 @@ else:
                                 "tags": fb.get("tags", []),
                                 "summary": fb.get("summary", ""),
                                 "feedback": fb.get("feedback", ""),
-                                "teacher_feedback_context": _clip(st.session_state.teacher_feedback_context, 400),
                             })
 
                     if st.session_state.chat_history:
