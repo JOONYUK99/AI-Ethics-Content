@@ -605,3 +605,4 @@ elif mode == "학생용 (수업 참여)":
             st.session_state.feedback_data = None
             st.session_state.total_steps = 0
             st.rerun()
+            
