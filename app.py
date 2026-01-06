@@ -11,7 +11,14 @@ from datetime import datetime
 st.set_page_config(page_title="AI 윤리 교육", page_icon="🤖", layout="wide")
 
 # =========================================================
-# 2) OpenAI client
+# 2) Fixed model configuration (설정 UI 제거: 여기서 고정)
+# =========================================================
+TEXT_MODEL = "gpt-4o"
+IMAGE_MODEL = "dall-e-3"
+STUDENT_IMAGE_TOGGLE_DEFAULT = True  # 학생 화면의 "이미지 보기" 토글 기본값
+
+# =========================================================
+# 3) OpenAI client
 # =========================================================
 try:
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -20,7 +27,7 @@ except Exception:
     st.stop()
 
 # =========================================================
-# 3) System persona (dry / bullet style)
+# 4) System persona (dry / bullet style)
 # =========================================================
 SYSTEM_PERSONA = """
 당신은 AI 윤리 튜터입니다.
@@ -30,7 +37,7 @@ SYSTEM_PERSONA = """
 """
 
 # =========================================================
-# 4) Helpers / Functions
+# 5) Helpers / Functions
 # =========================================================
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -42,7 +49,6 @@ def safe_json_load(s: str):
     try:
         return json.loads(s)
     except Exception:
-        # try extracting a JSON object portion
         try:
             a = s.find("{")
             b = s.rfind("}")
@@ -55,7 +61,7 @@ def safe_json_load(s: str):
 def ask_gpt_text(prompt: str) -> str:
     try:
         resp = client.chat.completions.create(
-            model=st.session_state.text_model,
+            model=TEXT_MODEL,
             messages=[
                 {"role": "system", "content": SYSTEM_PERSONA},
                 {"role": "user", "content": prompt},
@@ -69,7 +75,7 @@ def ask_gpt_text(prompt: str) -> str:
 def ask_gpt_json_object(prompt: str) -> dict:
     try:
         resp = client.chat.completions.create(
-            model=st.session_state.text_model,
+            model=TEXT_MODEL,
             messages=[
                 {"role": "system", "content": SYSTEM_PERSONA},
                 {"role": "user", "content": prompt},
@@ -98,19 +104,21 @@ def generate_scenario_3steps(topic: str) -> dict:
     scenario = data.get("scenario", [])
     if not isinstance(scenario, list):
         return {"scenario": []}
+
     cleaned = []
     for s in scenario[:3]:
         if not isinstance(s, dict):
             continue
-        cleaned.append({
-            "story": str(s.get("story", "")).strip(),
-            "choice_a": str(s.get("choice_a", "")).strip(),
-            "choice_b": str(s.get("choice_b", "")).strip(),
-        })
-    # ensure exactly 3 if possible
-    return {"scenario": cleaned if len(cleaned) == 3 else cleaned}
+        cleaned.append(
+            {
+                "story": str(s.get("story", "")).strip(),
+                "choice_a": str(s.get("choice_a", "")).strip(),
+                "choice_b": str(s.get("choice_b", "")).strip(),
+            }
+        )
+    return {"scenario": cleaned}
 
-def regenerate_single_step(topic: str, step_index_1based: int) -> dict | None:
+def regenerate_single_step(topic: str, step_index_1based: int):
     prompt = f"""
 주제 '{topic}'의 {step_index_1based}단계 딜레마를 다시 작성.
 반드시 JSON만 출력.
@@ -145,12 +153,15 @@ tags 후보:
 프라이버시, 공정성, 책임, 안전, 투명성, 존엄성, 데이터보호, 편향, 설명가능성
 """
     data = ask_gpt_json_object(prompt)
+
     tags = data.get("tags", [])
     if not isinstance(tags, list):
         tags = []
     tags = [str(t).strip() for t in tags if str(t).strip()][:3]
+
     summary = str(data.get("summary", "")).strip()
     fb = str(data.get("feedback", "")).strip() or "응답 불가."
+
     return {"tags": tags, "summary": summary, "feedback": fb}
 
 @st.cache_data(show_spinner=False)
@@ -202,11 +213,13 @@ def compute_report(logs: list[dict]):
         if isinstance(tags, list):
             for t in tags:
                 tag_counts[t] = tag_counts.get(t, 0) + 1
+
         step = row.get("step")
         choice = row.get("choice")
         if isinstance(step, int) and isinstance(choice, str) and choice.strip():
             step_choice_counts.setdefault(step, {})
             step_choice_counts[step][choice] = step_choice_counts[step].get(choice, 0) + 1
+
     return tag_counts, step_choice_counts
 
 def reset_student_progress(keep_logs: bool = True):
@@ -225,7 +238,7 @@ def reset_student_progress(keep_logs: bool = True):
         st.session_state.logs = []
 
 # =========================================================
-# 5) Session state init
+# 6) Session state init
 # =========================================================
 if "scenario" not in st.session_state or not isinstance(st.session_state.scenario, dict):
     st.session_state.scenario = {"scenario": []}
@@ -238,16 +251,11 @@ default_keys = {
     "tutorial_done": False,
     "tutorial_step": 1,
 
-    "text_model": "gpt-4o",
-    "image_model": "dall-e-3",
-    "show_images_default": True,
-
     "logs": [],
     "student_name": "",
-
     "confirm_student_reset": False,
 
-    # ✅ tutorial for students (new)
+    # tutorial for students
     "tutorial_choice": "",
     "tutorial_reason": "",
     "tutorial_img_prompt": "",
@@ -258,30 +266,9 @@ for k, v in default_keys.items():
         st.session_state[k] = v
 
 # =========================================================
-# 6) Sidebar
+# 7) Sidebar (설정 UI 제거)
 # =========================================================
 st.sidebar.title("🤖 AI 윤리 학습")
-
-with st.sidebar.expander("⚙️ 설정", expanded=False):
-    st.session_state.text_model = st.selectbox(
-        "텍스트 모델",
-        options=["gpt-4o", "gpt-4o-mini"],
-        index=0 if st.session_state.text_model == "gpt-4o" else 1,
-        key="sb_text_model",
-    )
-    st.session_state.image_model = st.selectbox(
-        "이미지 모델",
-        options=["dall-e-3"],
-        index=0,
-        key="sb_image_model",
-    )
-    st.session_state.show_images_default = st.checkbox(
-        "학생 모드: 이미지 기본 표시",
-        value=st.session_state.show_images_default,
-        key="sb_show_images_default",
-    )
-
-st.sidebar.divider()
 
 if st.sidebar.button("⚠️ 앱 전체 초기화(완전 초기화)", key="sb_hard_reset"):
     st.session_state.clear()
@@ -311,11 +298,11 @@ if mode == "🙋‍♂️ 학생용":
         st.sidebar.warning("정말 초기화?")
         c1, c2 = st.sidebar.columns(2)
         with c1:
-            if st.button("초기화 확정", key="sb_student_reset_confirm"):
+            if st.sidebar.button("초기화 확정", key="sb_student_reset_confirm"):
                 reset_student_progress(keep_logs=True)
                 st.rerun()
         with c2:
-            if st.button("취소", key="sb_student_reset_cancel"):
+            if st.sidebar.button("취소", key="sb_student_reset_cancel"):
                 st.session_state.confirm_student_reset = False
                 st.rerun()
 
@@ -329,7 +316,7 @@ if mode == "🙋‍♂️ 학생용":
         )
 
 # =========================================================
-# 7) Main: Teacher mode
+# 8) Main: Teacher mode
 # =========================================================
 if mode == "👨‍🏫 교사용":
     st.header("🛠️ 수업 생성")
@@ -460,7 +447,7 @@ if mode == "👨‍🏫 교사용":
             )
 
 # =========================================================
-# 8) Main: Student mode
+# 9) Main: Student mode
 # =========================================================
 else:
     # --------------------------
@@ -535,7 +522,7 @@ else:
                         with st.spinner("생성..."):
                             st.session_state.tutorial_img_bytes = generate_image_bytes_cached(
                                 st.session_state.tutorial_img_prompt.strip(),
-                                st.session_state.image_model,
+                                IMAGE_MODEL,
                             )
                         if not st.session_state.tutorial_img_bytes:
                             st.error("이미지 생성 실패(텍스트만 진행 가능).")
@@ -543,7 +530,9 @@ else:
                         st.warning("프롬프트 입력 필요.")
             with c2:
                 if st.button("예시 넣기", key="tut_example"):
-                    st.session_state.tutorial_img_prompt = "A student learning AI ethics with a robot tutor in a classroom"
+                    st.session_state.tutorial_img_prompt = (
+                        "A student learning AI ethics with a robot tutor in a classroom"
+                    )
                     st.rerun()
             with c3:
                 if st.button("이전", key="tut_back_2"):
@@ -575,7 +564,11 @@ else:
             with top1:
                 st.caption(f"주제: {st.session_state.topic or '미지정'}")
             with top2:
-                show_img = st.toggle("이미지 보기", value=st.session_state.show_images_default, key="student_show_img")
+                show_img = st.toggle(
+                    "이미지 보기",
+                    value=STUDENT_IMAGE_TOGGLE_DEFAULT,
+                    key="student_show_img",
+                )
             with top3:
                 if st.button("처음으로(학생)", key="student_to_tutorial"):
                     reset_student_progress(keep_logs=True)
@@ -606,7 +599,7 @@ else:
                         with st.spinner("이미지 생성..."):
                             st.session_state[img_key] = generate_image_bytes_cached(
                                 data.get("story", "AI ethics"),
-                                st.session_state.image_model,
+                                IMAGE_MODEL,
                             )
                     if st.session_state.get(img_key):
                         st.image(st.session_state[img_key])
@@ -616,7 +609,11 @@ else:
                 st.info(data.get("story", "내용 없음"))
 
                 with st.form(f"form_{idx}"):
-                    sel = st.radio("선택", [data.get("choice_a", "A"), data.get("choice_b", "B")], key=f"radio_{idx}")
+                    sel = st.radio(
+                        "선택",
+                        [data.get("choice_a", "A"), data.get("choice_b", "B")],
+                        key=f"radio_{idx}",
+                    )
                     reason = st.text_area("이유", key=f"reason_{idx}")
                     submitted = st.form_submit_button("제출")
 
@@ -637,21 +634,25 @@ else:
 
                         # chat history (display)
                         st.session_state.chat_history.append({"role": "user", "content": f"[{sel}] {reason}"})
-                        st.session_state.chat_history.append({"role": "assistant", "content": fb.get("feedback", "응답 불가.")})
+                        st.session_state.chat_history.append(
+                            {"role": "assistant", "content": fb.get("feedback", "응답 불가.")}
+                        )
 
                         # logs
-                        st.session_state.logs.append({
-                            "timestamp": now_str(),
-                            "student_name": st.session_state.student_name,
-                            "topic": st.session_state.topic,
-                            "step": idx + 1,
-                            "story": data.get("story", ""),
-                            "choice": sel,
-                            "reason": reason,
-                            "tags": fb.get("tags", []),
-                            "summary": fb.get("summary", ""),
-                            "feedback": fb.get("feedback", ""),
-                        })
+                        st.session_state.logs.append(
+                            {
+                                "timestamp": now_str(),
+                                "student_name": st.session_state.student_name,
+                                "topic": st.session_state.topic,
+                                "step": idx + 1,
+                                "story": data.get("story", ""),
+                                "choice": sel,
+                                "reason": reason,
+                                "tags": fb.get("tags", []),
+                                "summary": fb.get("summary", ""),
+                                "feedback": fb.get("feedback", ""),
+                            }
+                        )
 
                 if st.session_state.chat_history:
                     st.divider()
