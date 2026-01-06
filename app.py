@@ -4,17 +4,20 @@ import json
 import base64
 import requests
 from datetime import datetime
+import hashlib
+import numpy as np
 
 # =========================================================
 # 1) Page config
 # =========================================================
-st.set_page_config(page_title="AI 윤리 교육", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AI 윤리 교육 (RAG)", page_icon="🤖", layout="wide")
 
 # =========================================================
 # 2) Model configuration
 # =========================================================
 TEXT_MODEL = "gpt-4o"
 IMAGE_MODEL = "dall-e-3"
+EMBED_MODEL = "text-embedding-3-small"
 
 # ✅ 이미지에 글자(영어/한글 포함) 나오지 않게 강제
 NO_TEXT_IMAGE_PREFIX = (
@@ -49,7 +52,7 @@ SYSTEM_PERSONA = """
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def _clip(s: str, max_len: int = 900) -> str:
+def _clip(s: str, max_len: int = 1600) -> str:
     s = (s or "").strip()
     return s[:max_len] + ("…" if len(s) > max_len else "")
 
@@ -167,7 +170,6 @@ def normalize_analysis(analysis_any):
             "curriculum_alignment": analysis_any.get("curriculum_alignment", []),
             "lesson_content": analysis_any.get("lesson_content", []),
         }
-    # backward compatibility (string -> put into lesson_content)
     if isinstance(analysis_any, str) and analysis_any.strip():
         return {
             "ethics_standards": [],
@@ -210,50 +212,154 @@ def render_analysis_box(analysis_dict):
         render_bullets(a.get("lesson_content", []))
 
 # =========================================================
-# 6) Lesson generation
+# 6) RAG (reference.txt from GitHub)
 # =========================================================
-def generate_teacher_analysis(topic: str, steps: list, lesson_type: str) -> dict:
-    # Keep steps short for prompt size
-    short_steps = []
-    for s in steps[:6]:
-        short_steps.append({
-            "type": s.get("type", ""),
-            "story": _clip(s.get("story", ""), 240),
-            "choice_a": _clip(s.get("choice_a", ""), 120),
-            "choice_b": _clip(s.get("choice_b", ""), 120),
-            "question": _clip(s.get("question", ""), 160),
-            "prompt_goal": _clip(s.get("prompt_goal", ""), 160),
-        })
+def sha256_text(s: str) -> str:
+    return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
 
-    prompt = f"""
-교사용 분석 결과 생성.
-주제: '{topic}'
-수업 유형: {lesson_type}
+def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
+    """
+    Simple character-based chunker with overlap.
+    Prefer paragraph breaks, but remains robust with plain text.
+    """
+    text = (text or "").replace("\r\n", "\n").strip()
+    if not text:
+        return []
 
-수업 단계 요약(참고):
-{json.dumps(short_steps, ensure_ascii=False)}
+    # Split on blank lines first to preserve structure
+    parts = []
+    buf = []
+    for line in text.split("\n"):
+        if line.strip() == "":
+            if buf:
+                parts.append("\n".join(buf).strip())
+                buf = []
+        else:
+            buf.append(line)
+    if buf:
+        parts.append("\n".join(buf).strip())
 
-반드시 JSON만 출력.
-키:
-- ethics_standards: 문자열 리스트(5개 내외)
-  - 예: 책임, 공정성, 투명성, 프라이버시, 안전, 저작권/출처표기 등
-  - 법 조항 단정 금지. '원칙/기준' 수준으로 작성
-- curriculum_alignment: 문자열 리스트(4~6개)
-  - 초등 5~6학년 기준
-  - 실과/도덕 중심으로 연계(필요시 창체 포함)
-- lesson_content: 문자열 리스트(4~6개)
-  - 수업 흐름 요약(도입-활동-토론-정리)
-  - 학생 활동(선택/토론/프롬프트 이미지 생성 등) 포함
-"""
-    data = ask_gpt_json_object(prompt)
-    return normalize_analysis(data)
+    # Re-pack into chunks
+    chunks = []
+    current = ""
+    for p in parts:
+        if len(current) + len(p) + 2 <= max_chars:
+            current = (current + "\n\n" + p).strip() if current else p
+        else:
+            if current:
+                chunks.append(current)
+            # If a single paragraph is too large, hard-split
+            if len(p) > max_chars:
+                start = 0
+                while start < len(p):
+                    end = min(len(p), start + max_chars)
+                    chunks.append(p[start:end])
+                    start = max(0, end - overlap)
+                current = ""
+            else:
+                current = p
+    if current:
+        chunks.append(current)
 
-def generate_scenario_3steps(topic: str) -> dict:
+    # Add overlap between chunks (by carrying tail)
+    final = []
+    for i, c in enumerate(chunks):
+        if i == 0:
+            final.append(c)
+        else:
+            tail = chunks[i - 1][-overlap:] if overlap > 0 else ""
+            merged = (tail + "\n" + c).strip() if tail else c
+            final.append(merged)
+    return [x.strip() for x in final if x.strip()]
+
+@st.cache_data(show_spinner=False)
+def load_reference_text_cached(url: str, rag_nonce: int) -> str:
+    url = (url or "").strip()
+    if not url:
+        return ""
+    resp = requests.get(url, timeout=25)
+    resp.raise_for_status()
+    # guard: avoid indexing absurdly large files
+    text = resp.text
+    if len(text) > 1_200_000:
+        text = text[:1_200_000]
+    return text
+
+@st.cache_data(show_spinner=False)
+def build_rag_index_cached(url: str, embed_model: str, rag_nonce: int):
+    """
+    Returns:
+      - chunks: List[str]
+      - emb: np.ndarray shape [n, d] float32
+      - norms: np.ndarray shape [n] float32
+      - content_hash: str
+    """
+    txt = load_reference_text_cached(url, rag_nonce)
+    if not txt.strip():
+        return {"chunks": [], "emb": None, "norms": None, "content_hash": ""}
+
+    content_hash = sha256_text(txt)
+    chunks = chunk_text(txt, max_chars=900, overlap=160)
+    if not chunks:
+        return {"chunks": [], "emb": None, "norms": None, "content_hash": content_hash}
+
+    # embeddings (batch)
+    try:
+        resp = client.embeddings.create(model=embed_model, input=chunks)
+        vecs = [d.embedding for d in resp.data]
+        emb = np.array(vecs, dtype=np.float32)
+        norms = np.linalg.norm(emb, axis=1) + 1e-8
+        return {"chunks": chunks, "emb": emb, "norms": norms, "content_hash": content_hash}
+    except Exception:
+        return {"chunks": chunks, "emb": None, "norms": None, "content_hash": content_hash}
+
+def rag_retrieve(query: str, index: dict, top_k: int = 4) -> str:
+    query = (query or "").strip()
+    if not query:
+        return ""
+    if not index or not index.get("chunks") or index.get("emb") is None:
+        return ""
+
+    try:
+        q = client.embeddings.create(model=EMBED_MODEL, input=query).data[0].embedding
+        qv = np.array(q, dtype=np.float32)
+        qn = np.linalg.norm(qv) + 1e-8
+
+        emb = index["emb"]
+        norms = index["norms"]
+        sims = (emb @ qv) / (norms * qn)
+        k = max(1, min(int(top_k), len(index["chunks"])))
+        top_idx = np.argsort(-sims)[:k].tolist()
+
+        # Keep context compact
+        ctx_blocks = []
+        for i in top_idx:
+            ctx_blocks.append(index["chunks"][i].strip())
+        ctx = "\n\n---\n\n".join(ctx_blocks)
+        return _clip(ctx, 2200)
+    except Exception:
+        return ""
+
+def get_rag_index():
+    if not st.session_state.get("use_rag", True):
+        return None
+    url = (st.session_state.get("reference_url") or "").strip()
+    if not url:
+        return None
+    return build_rag_index_cached(url, EMBED_MODEL, st.session_state.get("rag_nonce", 0))
+
+# =========================================================
+# 7) Lesson generation (RAG-applied)
+# =========================================================
+def generate_scenario_3steps(topic: str, rag_ctx: str = "") -> dict:
     prompt = f"""
 주제 '{topic}'의 3단계 딜레마 시나리오를 생성.
 반드시 JSON만 출력.
 최상위 키: scenario (리스트, 길이=3)
 각 원소 키: story, choice_a, choice_b
+
+[외부 참고자료(reference.txt 발췌)]
+{rag_ctx if rag_ctx else "- 없음"}
 
 조건:
 - 초등 고학년 수준
@@ -264,10 +370,13 @@ def generate_scenario_3steps(topic: str) -> dict:
     steps = normalize_steps(data.get("scenario", []))
     return {"scenario": steps}
 
-def generate_mixed_lesson(topic: str) -> tuple[str, dict, dict, str]:
+def generate_mixed_lesson(topic: str, rag_ctx: str = "") -> tuple[str, dict, dict, str]:
     prompt = f"""
 초등 고학년 대상 AI 윤리 수업(혼합형) 생성.
 주제: '{topic}'
+
+[외부 참고자료(reference.txt 발췌)]
+{rag_ctx if rag_ctx else "- 없음"}
 
 반드시 JSON만 출력.
 키:
@@ -276,7 +385,7 @@ def generate_mixed_lesson(topic: str) -> tuple[str, dict, dict, str]:
   - ethics_standards: 문자열 리스트
   - curriculum_alignment: 문자열 리스트
   - lesson_content: 문자열 리스트
-- teacher_guide: 개조식 문자열(도입-활동-토론-정리 흐름, 교사용 질문 3개, 간단 평가 기준 포함)
+- teacher_guide: 개조식 문자열(도입-활동-토론-정리, 교사용 질문 3개, 간단 평가 기준 포함)
 - scenario: 리스트(길이 4~5)
 
 scenario의 각 단계 type:
@@ -306,15 +415,14 @@ type="image_task" | "dilemma" | "discussion"
             "question": "이 활동에서 중요한 점 1개를 말하라.",
         }] + steps)
 
-    if not analysis.get("ethics_standards") and not analysis.get("curriculum_alignment") and not analysis.get("lesson_content"):
-        # Fallback: generate analysis separately
-        analysis = generate_teacher_analysis(t, steps, "general")
-
     return t, analysis, {"scenario": steps}, guide
 
-def generate_copyright_lesson() -> tuple[str, dict, dict, str]:
-    prompt = """
+def generate_copyright_lesson(rag_ctx: str = "") -> tuple[str, dict, dict, str]:
+    prompt = f"""
 초등 고학년 대상 '저작권 + 생성형 AI 이미지' 수업 생성.
+
+[외부 참고자료(reference.txt 발췌)]
+{rag_ctx if rag_ctx else "- 없음"}
 
 반드시 JSON만 출력.
 키:
@@ -348,6 +456,7 @@ def generate_copyright_lesson() -> tuple[str, dict, dict, str]:
     guide = str(data.get("teacher_guide", "")).strip()
     steps = normalize_steps(data.get("scenario", []))
 
+    # Fallback
     if len(steps) < 4 or steps[0].get("type") != "image_task":
         steps = [
             {
@@ -385,19 +494,16 @@ def generate_copyright_lesson() -> tuple[str, dict, dict, str]:
             "4) 정리: 다음 행동 1개(약관 확인/출처표기/허락 받기)",
         ])
 
-    if not analysis.get("ethics_standards") and not analysis.get("curriculum_alignment") and not analysis.get("lesson_content"):
-        analysis = generate_teacher_analysis(topic, steps, "copyright")
-
     return topic, analysis, {"scenario": steps}, guide
 
 # =========================================================
-# 7) Feedback (teacher opinion reflected)
+# 8) Feedback (RAG + teacher rubric)
 # =========================================================
 def get_teacher_feedback_context() -> str:
     ctx = (st.session_state.get("teacher_feedback_context") or "").strip()
     return _clip(ctx, 900) if ctx else ""
 
-def feedback_with_tags(step_story: str, answer_text: str, extra_context: str = "", mode: str = "generic") -> dict:
+def feedback_with_tags(step_story: str, answer_text: str, extra_context: str = "", mode: str = "generic", rag_ctx: str = "") -> dict:
     teacher_ctx = get_teacher_feedback_context()
 
     if mode == "copyright":
@@ -409,6 +515,9 @@ def feedback_with_tags(step_story: str, answer_text: str, extra_context: str = "
 
     prompt = f"""
 상황/활동: {step_story}
+
+[외부 참고자료(reference.txt 발췌)]
+{rag_ctx if rag_ctx else "- 없음"}
 
 [교사 관점/평가기준(반영)]
 {teacher_ctx if teacher_ctx else "- (교사 입력 없음)"}
@@ -425,7 +534,7 @@ def feedback_with_tags(step_story: str, answer_text: str, extra_context: str = "
 키:
 - tags: 문자열 리스트(최대 3개)
 - summary: 1줄 요약
-- feedback: 단답형 피드백(핵심만, 교사 관점/기준을 반영)
+- feedback: 단답형 피드백(핵심만, 교사 기준 + 외부 자료 관점을 반영)
 
 tags 후보:
 {tag_candidates}
@@ -442,7 +551,7 @@ tags 후보:
     return {"tags": tags, "summary": summary, "feedback": fb}
 
 # =========================================================
-# 8) Image generation
+# 9) Image generation
 # =========================================================
 @st.cache_data(show_spinner=False)
 def generate_image_bytes_cached(user_prompt: str, image_model: str):
@@ -481,7 +590,7 @@ def generate_image_bytes_cached(user_prompt: str, image_model: str):
         return None
 
 # =========================================================
-# 9) Reports / Reset
+# 10) Reports / Reset
 # =========================================================
 def compute_report(logs):
     tag_counts = {}
@@ -521,7 +630,7 @@ def reset_student_progress(keep_logs: bool = True):
         st.session_state.logs = []
 
 # =========================================================
-# 10) Session state init
+# 11) Session state init
 # =========================================================
 if "scenario" not in st.session_state or not isinstance(st.session_state.scenario, dict):
     st.session_state.scenario = {"scenario": []}
@@ -540,9 +649,13 @@ default_keys = {
 
     "lesson_type": "general",      # general | copyright
     "teacher_guide": "",
-
-    # ✅ teacher viewpoint/rubric for feedback
     "teacher_feedback_context": "",
+
+    # RAG settings
+    "use_rag": True,
+    "reference_url": st.secrets.get("REFERENCE_TXT_URL", ""),  # ✅ put GitHub RAW URL in secrets
+    "rag_top_k": 4,
+    "rag_nonce": 0,  # increment to refresh only RAG cache
 
     # tutorial
     "tutorial_choice": "",
@@ -558,19 +671,47 @@ for k, v in default_keys.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Normalize analysis always
 st.session_state.analysis = normalize_analysis(st.session_state.analysis)
 
 # =========================================================
-# 11) Sidebar
+# 12) Sidebar
 # =========================================================
-st.sidebar.title("🤖 AI 윤리 학습")
+st.sidebar.title("🤖 AI 윤리 학습 (RAG)")
 
-if st.sidebar.button("⚠️ 앱 전체 초기화(완전 초기화)", key="sb_hard_reset"):
+if st.sidebar.button("⚠️ 앱 전체 초기화(완전 초기화)"):
     st.session_state.clear()
     st.rerun()
 
 mode = st.sidebar.radio("모드 선택", ["👨‍🏫 교사용", "🙋‍♂️ 학생용"], key="sb_mode")
+
+# --- RAG controls (both modes) ---
+st.sidebar.subheader("📚 RAG 설정(reference.txt)")
+st.session_state.use_rag = st.sidebar.checkbox("RAG 사용", value=st.session_state.use_rag)
+st.session_state.reference_url = st.sidebar.text_input(
+    "reference.txt (GitHub RAW URL)",
+    value=st.session_state.reference_url,
+    placeholder="https://raw.githubusercontent.com/<owner>/<repo>/main/reference.txt",
+)
+st.session_state.rag_top_k = st.sidebar.slider("검색 Top-K", 1, 8, int(st.session_state.rag_top_k))
+
+cR1, cR2 = st.sidebar.columns(2)
+with cR1:
+    if st.sidebar.button("RAG 새로고침"):
+        st.session_state.rag_nonce += 1
+        st.rerun()
+with cR2:
+    if st.sidebar.button("RAG 상태"):
+        idx = get_rag_index()
+        if not st.session_state.use_rag:
+            st.sidebar.info("RAG OFF")
+        elif not st.session_state.reference_url.strip():
+            st.sidebar.warning("URL 없음")
+        elif not idx or not idx.get("chunks"):
+            st.sidebar.warning("인덱스 없음/로드 실패")
+        elif idx.get("emb") is None:
+            st.sidebar.warning("임베딩 실패(키/요금/모델 확인)")
+        else:
+            st.sidebar.success(f"OK: chunks={len(idx['chunks'])}")
 
 if mode == "🙋‍♂️ 학생용":
     st.sidebar.subheader("🙋‍♂️ 학생 도구")
@@ -579,24 +720,23 @@ if mode == "🙋‍♂️ 학생용":
         value=st.session_state.student_name,
         key="sb_student_name",
     )
-
-    if st.sidebar.button("연습 다시하기(튜토리얼)", key="sb_restart_tutorial"):
+    if st.sidebar.button("연습 다시하기(튜토리얼)"):
         reset_student_progress(keep_logs=True)
         st.rerun()
 
     if not st.session_state.confirm_student_reset:
-        if st.sidebar.button("진행 초기화(학생)", key="sb_student_reset_req"):
+        if st.sidebar.button("진행 초기화(학생)"):
             st.session_state.confirm_student_reset = True
             st.rerun()
     else:
         st.sidebar.warning("정말 초기화?")
         c1, c2 = st.sidebar.columns(2)
         with c1:
-            if st.sidebar.button("초기화 확정", key="sb_student_reset_confirm"):
+            if st.sidebar.button("초기화 확정"):
                 reset_student_progress(keep_logs=True)
                 st.rerun()
         with c2:
-            if st.sidebar.button("취소", key="sb_student_reset_cancel"):
+            if st.sidebar.button("취소"):
                 st.session_state.confirm_student_reset = False
                 st.rerun()
 
@@ -606,52 +746,60 @@ if mode == "🙋‍♂️ 학생용":
             data=json.dumps(st.session_state.logs, ensure_ascii=False, indent=2),
             file_name="ethics_class_log.json",
             mime="application/json",
-            key="sb_logs_download",
         )
 
 # =========================================================
-# 12) Teacher mode
+# 13) Teacher mode
 # =========================================================
 if mode == "👨‍🏫 교사용":
-    st.header("🛠️ 수업 생성")
+    st.header("🛠️ 수업 생성 (RAG)")
 
-    # ✅ 교사용 가이드라인(=사용법)
+    # ✅ 교사용 가이드라인(사용법)
     with st.expander("📘 교사용 가이드라인(사용법)", expanded=True):
         st.markdown(
             """
-**1) 수업 생성**
+**1) reference.txt 연결**
+- GitHub의 `reference.txt`를 RAW URL로 준비
+- 사이드바 `reference.txt (GitHub RAW URL)`에 입력
+- `RAG 상태`에서 chunks/임베딩 OK 확인
+
+**2) 수업 생성**
 - 주제 입력 → `딜레마 3단계` 또는 `혼합 수업` 또는 `예시 수업(저작권)` 클릭
-- 생성 완료 후 아래에서 분석 결과/시나리오 미리보기 확인
+- 생성 시 reference.txt에서 관련 내용을 검색해(Top-K) 수업/분석에 반영
 
-**2) 피드백 기준(교사 의견) 반영**
-- 아래 `교사 피드백 기준/관점`에 수업 목표/강조점/평가 기준을 입력
-- 학생이 제출할 때, 해당 기준이 피드백에 자동 반영됨
+**3) 교사 의견(피드백 기준) 반영**
+- 아래 `교사 피드백 기준/관점`에 강조점 입력
+- 학생 제출 시, 그 기준 + reference.txt 관점이 함께 반영됨
 
-**3) 학생에게 배포**
-- `수업 패키지 다운로드(JSON)`로 파일 저장
-- 학생은 학생용 화면에서 JSON 업로드로 수업을 불러옴(교사 기준 포함)
-
-**4) 로그 확인**
-- 학생 제출이 쌓이면 교사용 화면 하단에서 태그/활동 분포 확인 가능
+**4) 학생에게 배포**
+- `수업 패키지 다운로드(JSON)`로 배포
+- 학생은 학생용 화면에서 JSON 업로드로 수업을 불러옴(RAG URL 포함)
 """
         )
 
-    # ✅ 교사 피드백 기준/관점
     with st.expander("🧑‍🏫 교사 피드백 기준/관점(학생 피드백에 반영)", expanded=False):
-        st.caption("예: 반드시 ‘근거 1개’ 포함, ‘다음 행동 1개’ 제시, 저작권 수업은 ‘약관/규칙 확인’ 언급 가점 등")
+        st.caption("예: 근거 1개 포함, 다음 행동 1개 제시, 약관/규칙 확인 언급 가점 등")
         st.session_state.teacher_feedback_context = st.text_area(
             "교사 기준 입력",
             value=st.session_state.teacher_feedback_context,
             height=140,
-            placeholder="예) 1) 허락/출처표기/사용목적을 구분하면 가점  2) 약관/학교 규칙 확인을 언급하면 가점  3) 상업적 이용은 보류/대체안을 제시하면 가점",
-            key="teacher_feedback_context_input",
+            placeholder="예) 1) 허락/출처표기/사용목적 구분하면 가점  2) 약관/학교 규칙 확인 언급 가점  3) 대체안 제시 가점",
         )
 
-    input_topic = st.text_input("주제 입력", value=st.session_state.topic, key="teacher_topic_input")
+    input_topic = st.text_input("주제 입력", value=st.session_state.topic)
+
+    # Build RAG context for teacher generation
+    rag_index = get_rag_index()
+    def _teacher_rag_ctx(topic: str) -> str:
+        if not st.session_state.use_rag or not rag_index:
+            return ""
+        q = f"{topic} 인공지능 윤리기준 교육과정 수업 설계"
+        return rag_retrieve(q, rag_index, top_k=st.session_state.rag_top_k)
+
     colA, colB, colC, colD = st.columns([1, 1, 1, 1])
 
     with colA:
-        if st.button("딜레마 3단계 생성", key="teacher_generate_legacy"):
+        if st.button("딜레마 3단계 생성"):
             if not input_topic.strip():
                 st.warning("주제 필요.")
             else:
@@ -659,24 +807,42 @@ if mode == "👨‍🏫 교사용":
                     st.session_state.topic = input_topic.strip()
                     st.session_state.lesson_type = "general"
                     st.session_state.teacher_guide = ""
-                    st.session_state.scenario = generate_scenario_3steps(st.session_state.topic)
+                    rag_ctx = _teacher_rag_ctx(st.session_state.topic)
+                    st.session_state.scenario = generate_scenario_3steps(st.session_state.topic, rag_ctx=rag_ctx)
 
+                    # analysis via RAG too (use a small prompt)
                     steps = st.session_state.scenario.get("scenario", [])
-                    st.session_state.analysis = generate_teacher_analysis(
-                        st.session_state.topic, steps, st.session_state.lesson_type
+                    short_steps = json.dumps(
+                        [{"type": s.get("type",""), "story": _clip(s.get("story",""), 220)} for s in steps],
+                        ensure_ascii=False
                     )
+                    a_prompt = f"""
+교사용 분석 결과 생성. 반드시 JSON.
+주제: '{st.session_state.topic}'
+[외부 참고자료(reference.txt 발췌)]
+{rag_ctx if rag_ctx else "- 없음"}
+[수업 단계 요약]
+{short_steps}
+
+키:
+- ethics_standards: 문자열 리스트(5개 내외)
+- curriculum_alignment: 문자열 리스트(4~6개, 초등 5~6 실과/도덕 중심)
+- lesson_content: 문자열 리스트(4~6개, 도입-활동-토론-정리)
+"""
+                    st.session_state.analysis = normalize_analysis(ask_gpt_json_object(a_prompt))
 
                     st.session_state.current_step = 0
                     clear_generated_images_from_session()
                     st.success("생성 완료.")
 
     with colB:
-        if st.button("혼합 수업 생성(활동+선택)", key="teacher_generate_mixed"):
+        if st.button("혼합 수업 생성(활동+선택)"):
             if not input_topic.strip():
                 st.warning("주제 필요.")
             else:
                 with st.spinner("혼합 수업 구성 중..."):
-                    t, analysis, scenario_obj, guide = generate_mixed_lesson(input_topic.strip())
+                    rag_ctx = _teacher_rag_ctx(input_topic.strip())
+                    t, analysis, scenario_obj, guide = generate_mixed_lesson(input_topic.strip(), rag_ctx=rag_ctx)
                     st.session_state.topic = t
                     st.session_state.analysis = analysis
                     st.session_state.scenario = scenario_obj
@@ -687,9 +853,12 @@ if mode == "👨‍🏫 교사용":
                     st.success("생성 완료.")
 
     with colC:
-        if st.button("예시 수업 생성(저작권)", key="teacher_example_copyright"):
+        if st.button("예시 수업 생성(저작권)"):
             with st.spinner("저작권 수업 구성 중..."):
-                t, analysis, scenario_obj, guide = generate_copyright_lesson()
+                rag_ctx = ""
+                if st.session_state.use_rag and rag_index:
+                    rag_ctx = rag_retrieve("저작권 생성형 AI 이미지 출처표기 허락 사용목적 약관", rag_index, top_k=st.session_state.rag_top_k)
+                t, analysis, scenario_obj, guide = generate_copyright_lesson(rag_ctx=rag_ctx)
                 st.session_state.topic = t
                 st.session_state.analysis = analysis
                 st.session_state.scenario = scenario_obj
@@ -707,6 +876,10 @@ if mode == "👨‍🏫 교사용":
                 "analysis": st.session_state.analysis,
                 "teacher_guide": st.session_state.teacher_guide,
                 "teacher_feedback_context": st.session_state.teacher_feedback_context,
+                # ✅ share RAG settings
+                "use_rag": st.session_state.use_rag,
+                "reference_url": st.session_state.reference_url,
+                "rag_top_k": st.session_state.rag_top_k,
                 "scenario": st.session_state.scenario.get("scenario", []),
             }
             st.download_button(
@@ -714,7 +887,6 @@ if mode == "👨‍🏫 교사용":
                 data=json.dumps(pack, ensure_ascii=False, indent=2),
                 file_name="ethics_class_package.json",
                 mime="application/json",
-                key="teacher_pack_download",
             )
 
     if st.session_state.teacher_guide:
@@ -765,10 +937,10 @@ if mode == "👨‍🏫 교사용":
                 st.bar_chart(step_type_counts) if step_type_counts else st.caption("데이터 없음.")
 
 # =========================================================
-# 13) Student mode
+# 14) Student mode
 # =========================================================
 else:
-    # ✅ 교사가 만든 패키지 업로드(교사 기준 포함)
+    # ✅ 교사가 만든 패키지 업로드(교사 기준 + RAG URL 포함)
     with st.expander("📦 수업 불러오기(교사가 만든 JSON 업로드)", expanded=False):
         up = st.file_uploader("ethics_class_package.json", type=["json"])
         if up is not None:
@@ -780,6 +952,12 @@ else:
                 st.session_state.teacher_guide = pack.get("teacher_guide", "")
                 st.session_state.teacher_feedback_context = pack.get("teacher_feedback_context", "")
                 st.session_state.scenario = {"scenario": normalize_steps(pack.get("scenario", []))}
+
+                # apply RAG settings from teacher pack (optional)
+                st.session_state.use_rag = bool(pack.get("use_rag", st.session_state.use_rag))
+                st.session_state.reference_url = pack.get("reference_url", st.session_state.reference_url)
+                st.session_state.rag_top_k = int(pack.get("rag_top_k", st.session_state.rag_top_k))
+
                 st.session_state.current_step = 0
                 st.session_state.chat_history = []
                 clear_generated_images_from_session()
@@ -787,6 +965,9 @@ else:
                 st.rerun()
             except Exception:
                 st.error("JSON 로드 실패")
+
+    # Build RAG index for student feedback
+    rag_index = get_rag_index()
 
     # --------------------------
     # Tutorial
@@ -874,7 +1055,7 @@ else:
     else:
         steps = st.session_state.scenario.get("scenario", [])
         if not steps:
-            st.warning("데이터 없음. 교사용 탭에서 생성(또는 JSON 업로드) 필요.")
+            st.warning("데이터 없음. 교사용에서 생성 후 JSON 업로드 필요.")
             if st.button("새로고침", key="student_refresh"):
                 st.rerun()
         else:
@@ -919,6 +1100,13 @@ else:
                     st.image(st.session_state[img_key])
 
                 st.info(step.get("story", "내용 없음"))
+
+                # For each step: build RAG context for feedback
+                def _step_rag_ctx():
+                    if not st.session_state.use_rag or not rag_index:
+                        return ""
+                    q = f"{st.session_state.topic} {step.get('story','')} 윤리 기준 핵심"
+                    return rag_retrieve(q, rag_index, top_k=st.session_state.rag_top_k)
 
                 # -------------------------------------------------
                 # A) IMAGE TASK
@@ -981,12 +1169,15 @@ else:
                                 extra_context += f"학생 프롬프트: {user_prompt.strip()}\n"
 
                             mode_hint = "copyright" if st.session_state.lesson_type == "copyright" else "generic"
+                            rag_ctx = _step_rag_ctx()
+
                             with st.spinner("피드백..."):
                                 fb = feedback_with_tags(
                                     step.get("story", ""),
                                     opinion.strip(),
                                     extra_context=extra_context,
                                     mode=mode_hint,
+                                    rag_ctx=rag_ctx,
                                 )
 
                             with st.container(border=True):
@@ -1046,12 +1237,15 @@ else:
                                 extra_context = f"이전 활동 프롬프트: {st.session_state.last_student_image_prompt}"
 
                             mode_hint = "copyright" if st.session_state.lesson_type == "copyright" else "generic"
+                            rag_ctx = _step_rag_ctx()
+
                             with st.spinner("피드백..."):
                                 fb = feedback_with_tags(
                                     step.get("story", ""),
                                     opinion.strip(),
                                     extra_context=extra_context,
                                     mode=mode_hint,
+                                    rag_ctx=rag_ctx,
                                 )
 
                             with st.container(border=True):
@@ -1113,6 +1307,7 @@ else:
 
                             mode_hint = "copyright" if st.session_state.lesson_type == "copyright" else "generic"
                             answer_text = f"선택: {sel}\n이유: {reason.strip()}"
+                            rag_ctx = _step_rag_ctx()
 
                             with st.spinner("분석..."):
                                 fb = feedback_with_tags(
@@ -1120,6 +1315,7 @@ else:
                                     answer_text,
                                     extra_context=extra_context,
                                     mode=mode_hint,
+                                    rag_ctx=rag_ctx,
                                 )
 
                             with st.container(border=True):
