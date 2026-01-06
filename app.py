@@ -616,7 +616,7 @@ st.session_state.analysis = normalize_analysis(st.session_state.analysis)
 # =========================================================
 # 12) Sidebar
 # =========================================================
-st.sidebar.title("🤖 AI 윤리 학습 (RAG)")
+st.sidebar.title("🤖 AI 윤리 학습 ")
 
 if st.sidebar.button("⚠️ 앱 전체 초기화(완전 초기화)"):
     st.session_state.clear()
@@ -1244,3 +1244,4 @@ else:
                         st.session_state.current_step += 1
                         st.session_state.chat_history = []
                         st.rerun()
+
