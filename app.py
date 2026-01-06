@@ -15,7 +15,6 @@ st.set_page_config(page_title="AI 윤리 교육", page_icon="🤖", layout="wide
 # =========================================================
 TEXT_MODEL = "gpt-4o"
 IMAGE_MODEL = "dall-e-3"
-STUDENT_IMAGE_TOGGLE_DEFAULT = True  # 학생 화면의 "이미지 보기" 토글 기본값
 
 # =========================================================
 # 3) OpenAI client
@@ -137,9 +136,10 @@ def regenerate_single_step(topic: str, step_index_1based: int):
         "choice_b": str(data.get("choice_b", "")).strip(),
     }
 
-def feedback_with_tags(story: str, choice: str, reason: str) -> dict:
+def feedback_with_tags(story: str, choice: str, reason: str, extra_context: str = "") -> dict:
     prompt = f"""
 상황: {story}
+{extra_context}
 선택: {choice}
 이유: {reason}
 
@@ -165,7 +165,7 @@ tags 후보:
     return {"tags": tags, "summary": summary, "feedback": fb}
 
 @st.cache_data(show_spinner=False)
-def generate_image_bytes_cached(prompt: str, image_model: str) -> bytes | None:
+def generate_image_bytes_cached(prompt: str, image_model: str):
     """
     Returns image bytes reliably:
     1) try b64_json
@@ -205,7 +205,7 @@ def generate_image_bytes_cached(prompt: str, image_model: str) -> bytes | None:
     except Exception:
         return None
 
-def compute_report(logs: list[dict]):
+def compute_report(logs):
     tag_counts = {}
     step_choice_counts = {}  # {step: {choice: count}}
     for row in logs:
@@ -222,6 +222,12 @@ def compute_report(logs: list[dict]):
 
     return tag_counts, step_choice_counts
 
+def clear_generated_images_from_session():
+    # 시나리오 자동 이미지 / 학생 제작 이미지 키 제거
+    to_del = [k for k in st.session_state.keys() if str(k).startswith("img_bytes_") or str(k).startswith("user_img_bytes_")]
+    for k in to_del:
+        del st.session_state[k]
+
 def reset_student_progress(keep_logs: bool = True):
     st.session_state.current_step = 0
     st.session_state.tutorial_done = False
@@ -236,6 +242,65 @@ def reset_student_progress(keep_logs: bool = True):
 
     if not keep_logs:
         st.session_state.logs = []
+
+def load_example_lesson_copyright():
+    """
+    예시 수업: 저작권 + 생성형 AI 이미지 제작 + 권리/책임 토론
+    - 하드코딩: 예시 버튼 누르면 항상 동일한 수업 생성
+    """
+    topic = "저작권과 생성형 AI 이미지: 누가 저작권자일까?"
+    analysis = "\n".join([
+        "- 핵심 가치: 책임, 공정성, 투명성, 존엄성",
+        "- 교과 연계: 실과(정보/디지털 활용), 도덕(권리와 책임, 배려, 공정)",
+        "- 목표:",
+        "  - 생성형 AI로 만든 이미지의 '권리/책임' 쟁점 이해",
+        "  - 프롬프트 작성(제작 과정)과 출처/약관 확인 습관화",
+        "  - 친구/학교 공동체에서의 사용 허락·표기·공정한 사용 원칙 토론",
+        "- 핵심 질문:",
+        "  - AI가 만든 이미지는 '누가' 만든 것인가?",
+        "  - 프롬프트 작성자는 저작권자일까, 사용자일까, 플랫폼일까?",
+        "  - 학교 과제/포스터/굿즈 판매처럼 '사용 목적'이 바뀌면 기준도 달라질까?"
+    ])
+
+    scenario = [
+        {
+            "story": "너는 학급 행사 포스터를 만들기 위해 생성형 AI로 그림을 만들었다. 프롬프트를 직접 작성했고, 결과 이미지는 멋지게 나왔다. 친구가 '이 그림 저작권은 네 거야?'라고 묻는다.",
+            "choice_a": "내가 프롬프트를 썼으니 저작권은 100% 내 것이라고 말한다.",
+            "choice_b": "저작권이 누구에게 있는지 확실치 않으니, 플랫폼/약관/규칙을 확인하고 사용 방식(표기 포함)을 정한다."
+        },
+        {
+            "story": "친구가 네가 만든 AI 이미지를 자기 발표 자료에 쓰고 싶다고 한다. 출처 표기를 할지, 너에게 허락을 받아야 하는지 고민한다.",
+            "choice_a": "조건부 허락: 출처(프롬프트/도구) 표기 + 용도 제한(발표만)으로 허락한다.",
+            "choice_b": "허락하지 않는다: 내 이미지이니 다른 사람이 쓰면 안 된다고 말한다."
+        },
+        {
+            "story": "학교 축제에서 포스터 이미지를 이용해 스티커를 만들어 판매하자는 의견이 나왔다. 그런데 AI 이미지의 상업적 사용이 가능한지(약관), 원본 데이터/권리 문제가 없는지 확신이 없다.",
+            "choice_a": "바로 판매한다: 이미지를 만들었으니 문제 없다고 판단한다.",
+            "choice_b": "판매 보류: 약관/규정 확인 후, 필요하면 직접 그린 그림이나 라이선스가 명확한 자료로 대체한다."
+        }
+    ]
+
+    teacher_guide = "\n".join([
+        "수업 흐름(예시)",
+        "1) 도입(5분): 'AI가 만든 그림의 저작권은 누구에게?' 질문 던지기",
+        "2) 제작 활동(10~15분): 학생이 프롬프트 작성 → 이미지 생성 → 결과 공유",
+        "   - 규칙: 개인정보/실존 인물/상표 로고/폭력적 표현 지양",
+        "3) 딜레마 토론(15~20분): 3단계 시나리오를 순서대로 진행",
+        "   - 토론 관점: 창작성(프롬프트 기여), 플랫폼 약관, 출처표기, 사용 목적(과제/공유/상업), 공동체 규칙",
+        "4) 정리(5분): 개인 결론 1문장 + 다음 행동 1개(예: 약관 확인, 출처 표기, 허락 받기)",
+        "",
+        "교사용 질문(예시)",
+        "- 프롬프트 작성은 '창작'인가? 어느 정도면 창작 기여가 있다고 볼까?",
+        "- 친구가 쓸 때 '허락'과 '출처표기'는 왜 필요한가?",
+        "- 과제 제출과 판매(상업적 이용)는 왜 다르게 봐야 하는가?",
+        "",
+        "평가(간단)",
+        "- 이유의 근거성(규칙/약관/공정/책임 관점)",
+        "- 타인 권리 고려(허락/표기/용도 제한)",
+        "- 대안 제시(직접 제작, 라이선스 명확 자료 사용, 확인 후 사용)"
+    ])
+
+    return topic, analysis, {"scenario": scenario}, teacher_guide
 
 # =========================================================
 # 6) Session state init
@@ -255,6 +320,10 @@ default_keys = {
     "student_name": "",
     "confirm_student_reset": False,
 
+    # lesson metadata
+    "lesson_type": "general",      # general | copyright
+    "teacher_guide": "",
+
     # tutorial for students
     "tutorial_choice": "",
     "tutorial_reason": "",
@@ -266,7 +335,7 @@ for k, v in default_keys.items():
         st.session_state[k] = v
 
 # =========================================================
-# 7) Sidebar (설정 UI 제거)
+# 7) Sidebar (설정 UI 없음)
 # =========================================================
 st.sidebar.title("🤖 AI 윤리 학습")
 
@@ -323,7 +392,7 @@ if mode == "👨‍🏫 교사용":
 
     input_topic = st.text_input("주제 입력", value=st.session_state.topic, key="teacher_topic_input")
 
-    colA, colB = st.columns([1, 1])
+    colA, colB, colC = st.columns([1, 1, 1])
 
     with colA:
         if st.button("생성 시작", key="teacher_generate"):
@@ -332,18 +401,37 @@ if mode == "👨‍🏫 교사용":
             else:
                 with st.spinner("데이터 생성 중..."):
                     st.session_state.topic = input_topic.strip()
+                    st.session_state.lesson_type = "general"
+                    st.session_state.teacher_guide = ""
+
                     st.session_state.scenario = generate_scenario_3steps(st.session_state.topic)
                     st.session_state.analysis = ask_gpt_text(
                         f"주제 '{st.session_state.topic}'의 핵심 가치, 교과, 목표를 개조식으로 요약."
                     )
                     st.session_state.current_step = 0
+                    clear_generated_images_from_session()
                     st.success("생성 완료.")
 
     with colB:
+        if st.button("예시 수업 생성(저작권)", key="teacher_example_copyright"):
+            with st.spinner("예시 수업 로딩..."):
+                topic, analysis, scenario_obj, guide = load_example_lesson_copyright()
+                st.session_state.topic = topic
+                st.session_state.analysis = analysis
+                st.session_state.scenario = scenario_obj
+                st.session_state.lesson_type = "copyright"
+                st.session_state.teacher_guide = guide
+                st.session_state.current_step = 0
+                clear_generated_images_from_session()
+                st.success("예시 수업 생성 완료.")
+
+    with colC:
         if st.session_state.scenario.get("scenario"):
             pack = {
                 "topic": st.session_state.topic,
+                "lesson_type": st.session_state.lesson_type,
                 "analysis": st.session_state.analysis,
+                "teacher_guide": st.session_state.teacher_guide,
                 "scenario": st.session_state.scenario.get("scenario", []),
             }
             st.download_button(
@@ -353,6 +441,11 @@ if mode == "👨‍🏫 교사용":
                 mime="application/json",
                 key="teacher_pack_download",
             )
+
+    if st.session_state.teacher_guide:
+        st.divider()
+        with st.expander("📌 교사용 수업 안내(예시)", expanded=True):
+            st.text(st.session_state.teacher_guide)
 
     scenario_data = st.session_state.scenario.get("scenario", [])
 
@@ -399,6 +492,9 @@ if mode == "👨‍🏫 교사용":
                             new_step = regenerate_single_step(st.session_state.topic, i + 1)
                             if new_step:
                                 st.session_state.scenario["scenario"][i] = new_step
+                                st.session_state.lesson_type = "general"
+                                st.session_state.teacher_guide = ""
+                                clear_generated_images_from_session()
                                 st.success("재생성 완료.")
                                 st.rerun()
                             else:
@@ -530,9 +626,7 @@ else:
                         st.warning("프롬프트 입력 필요.")
             with c2:
                 if st.button("예시 넣기", key="tut_example"):
-                    st.session_state.tutorial_img_prompt = (
-                        "A student learning AI ethics with a robot tutor in a classroom"
-                    )
+                    st.session_state.tutorial_img_prompt = "A student learning AI ethics with a robot tutor in a classroom"
                     st.rerun()
             with c3:
                 if st.button("이전", key="tut_back_2"):
@@ -560,16 +654,10 @@ else:
             idx = st.session_state.current_step
             total = len(steps)
 
-            top1, top2, top3 = st.columns([2, 1, 1])
+            top1, top2 = st.columns([3, 1])
             with top1:
                 st.caption(f"주제: {st.session_state.topic or '미지정'}")
             with top2:
-                show_img = st.toggle(
-                    "이미지 보기",
-                    value=STUDENT_IMAGE_TOGGLE_DEFAULT,
-                    key="student_show_img",
-                )
-            with top3:
                 if st.button("처음으로(학생)", key="student_to_tutorial"):
                     reset_student_progress(keep_logs=True)
                     st.rerun()
@@ -592,21 +680,58 @@ else:
                 st.progress((idx + 1) / total)
                 st.subheader(f"단계 {idx+1}")
 
-                # Image per step (session key)
+                # ✅ 항상 이미지 표시: 토글 제거, 항상 생성/표시
                 img_key = f"img_bytes_{idx}"
-                if show_img:
-                    if img_key not in st.session_state:
-                        with st.spinner("이미지 생성..."):
-                            st.session_state[img_key] = generate_image_bytes_cached(
-                                data.get("story", "AI ethics"),
-                                IMAGE_MODEL,
-                            )
-                    if st.session_state.get(img_key):
-                        st.image(st.session_state[img_key])
-                    else:
-                        st.caption("이미지 생성 실패(텍스트만 진행).")
+                if img_key not in st.session_state:
+                    with st.spinner("이미지 생성..."):
+                        st.session_state[img_key] = generate_image_bytes_cached(
+                            data.get("story", "AI ethics"),
+                            IMAGE_MODEL,
+                        )
+                if st.session_state.get(img_key):
+                    st.image(st.session_state[img_key])
+                else:
+                    st.caption("이미지 생성 실패(텍스트만 진행).")
 
                 st.info(data.get("story", "내용 없음"))
+
+                # ✅ 저작권 예시 수업일 때: 학생이 직접 이미지 제작 활동
+                extra_context = ""
+                if st.session_state.lesson_type == "copyright":
+                    st.divider()
+                    st.subheader("🎨 이미지 제작 활동(학생)")
+
+                    st.caption("간단 프롬프트 작성 → 이미지 생성 → '이 이미지의 저작권/사용 권한' 토론 준비")
+                    user_prompt_key = f"user_img_prompt_{idx}"
+                    user_img_key = f"user_img_bytes_{idx}"
+
+                    user_prompt = st.text_input(
+                        "내 이미지 프롬프트",
+                        value=st.session_state.get(user_prompt_key, ""),
+                        placeholder="예: cute eco poster style illustration",
+                        key=user_prompt_key,
+                    )
+
+                    c1, c2 = st.columns([1, 1])
+                    with c1:
+                        if st.button("내 이미지 생성", key=f"user_img_gen_{idx}"):
+                            if user_prompt.strip():
+                                with st.spinner("내 이미지 생성..."):
+                                    st.session_state[user_img_key] = generate_image_bytes_cached(user_prompt.strip(), IMAGE_MODEL)
+                            else:
+                                st.warning("프롬프트 입력 필요.")
+                    with c2:
+                        if st.button("내 이미지 지우기", key=f"user_img_clear_{idx}"):
+                            if user_img_key in st.session_state:
+                                del st.session_state[user_img_key]
+                            st.rerun()
+
+                    if st.session_state.get(user_img_key):
+                        st.image(st.session_state[user_img_key], caption="내가 만든 이미지(연습/토론용)")
+
+                    # 피드백 프롬프트에 추가 컨텍스트로 포함
+                    if user_prompt.strip():
+                        extra_context = f"학생 제작 프롬프트: {user_prompt.strip()}"
 
                 with st.form(f"form_{idx}"):
                     sel = st.radio(
@@ -622,7 +747,12 @@ else:
                         st.warning("이유 입력 필요.")
                     else:
                         with st.spinner("분석..."):
-                            fb = feedback_with_tags(data.get("story", ""), sel, reason)
+                            fb = feedback_with_tags(
+                                data.get("story", ""),
+                                sel,
+                                reason,
+                                extra_context=extra_context,
+                            )
 
                         with st.container(border=True):
                             st.markdown("#### 🧾 제출 요약")
@@ -644,6 +774,7 @@ else:
                                 "timestamp": now_str(),
                                 "student_name": st.session_state.student_name,
                                 "topic": st.session_state.topic,
+                                "lesson_type": st.session_state.lesson_type,
                                 "step": idx + 1,
                                 "story": data.get("story", ""),
                                 "choice": sel,
@@ -651,6 +782,7 @@ else:
                                 "tags": fb.get("tags", []),
                                 "summary": fb.get("summary", ""),
                                 "feedback": fb.get("feedback", ""),
+                                "student_image_prompt": st.session_state.get(f"user_img_prompt_{idx}", "") if st.session_state.lesson_type == "copyright" else "",
                             }
                         )
 
