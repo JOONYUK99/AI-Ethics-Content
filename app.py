@@ -11,7 +11,7 @@ from pathlib import Path
 # =========================================================
 # 1) Page config
 # =========================================================
-st.set_page_config(page_title="AI 윤리 교육 (RAG)", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AI 윤리 교육 ", page_icon="🤖", layout="wide")
 
 # =========================================================
 # 2) Model configuration
@@ -669,7 +669,7 @@ if mode == "🙋‍♂️ 학생용":
 # 13) Teacher mode
 # =========================================================
 if mode == "👨‍🏫 교사용":
-    st.header("🛠️ 수업 생성 (RAG: reference.txt 자동 적용)")
+    st.header("🛠️ 수업 생성 ")
 
     with st.expander("📘 교사용 가이드라인(사용법)", expanded=True):
         st.markdown(
