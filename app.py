@@ -22,28 +22,13 @@ EMBED_MODEL = "text-embedding-3-small"
 
 # =========================================================
 # 3) Internal RAG (reference.txt only)
-#   - Put reference.txt in your repo (same folder as this app)
+#   - Put reference.txt in your repo (same folder as this app), or adjust path.
 # =========================================================
 REFERENCE_PATH = "reference.txt"
 RAG_TOP_K = 4
 
 # =========================================================
-# 4) National AI Ethics Standards (MSIT 2020) - selected set
-#    (연구에서 선정한 5개 기준을 반드시 표시하도록 강제)
-# =========================================================
-SELECTED_NATIONAL_ETHICS = ["프라이버시 보호", "연대성", "데이터 관리", "침해 금지", "안전성"]
-
-# topic -> preferred subset (표준을 '노출'하기 위한 최소 매핑)
-TOPIC_TO_NATIONAL_ETHICS = [
-    (["저작", "copyright"], ["데이터 관리", "침해 금지", "연대성"]),
-    (["개인정보", "프라이버시", "privacy"], ["프라이버시 보호", "데이터 관리", "안전성"]),
-    (["딥페이크", "deepfake"], ["침해 금지", "프라이버시 보호", "안전성"]),
-    (["편향", "차별", "bias"], ["연대성", "침해 금지", "안전성"]),
-    (["추천", "알고리즘", "algorithm"], ["연대성", "데이터 관리", "안전성"]),
-]
-
-# =========================================================
-# 5) Image prompt policy: NO TEXT
+# 4) Image prompt policy: NO TEXT
 # =========================================================
 NO_TEXT_IMAGE_PREFIX = (
     "Minimalist, flat design illustration, educational context. "
@@ -53,7 +38,7 @@ NO_TEXT_IMAGE_PREFIX = (
 )
 
 # =========================================================
-# 6) OpenAI client
+# 5) OpenAI client
 # =========================================================
 try:
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -62,17 +47,37 @@ except Exception:
     st.stop()
 
 # =========================================================
-# 7) System persona (dry / bullet style)
+# 6) System persona (UPDATED)
 # =========================================================
 SYSTEM_PERSONA = """
-당신은 AI 윤리 튜터입니다.
-감정을 배제하고, 질문에 대해 핵심만 '단답형' 혹은 '개조식'으로 대답하세요.
-인사말(안녕, 반가워)과 서술어(~입니다, ~해요)를 생략하세요.
-단정적 법조문 결론 금지. "약관/규정/상황 확인 필요" 관점 유지.
+당신은 AI 윤리교육 보조교사 입니다.
+대상: 초등학교 5~6학년.
+
+[출력 기본]
+- 인사말/잡담 금지. 2~4개 항목 개조식으로만 출력.
+- 각 항목은 1문장 이내. 짧고 쉬운 단어 사용.
+- 어려운 단어는 괄호로 짧게 풀이.
+
+[학생 피드백 형식]
+- 아래 중 하나의 템플릿을 반드시 사용:
+  A) 잘한 점 / 위험 요소 / 확인 질문 / 다음 행동
+  B) 핵심 판단 / 근거 / 확인 질문 / 다음 행동
+
+[교사용 요청]
+- 교사용 요약/설계 요청이면 교사 관점으로 3~6개 항목 개조식.
+
+[JSON 시나리오 생성]
+- '시나리오 JSON 생성' 요청이면 JSON 객체만 출력.
+- 최상위 키: scenario
+- 각 원소 키: story, choice_a, choice_b
+- 불필요한 설명/문장/코드블록 금지(순수 JSON).
+
+[안전]
+- 개인정보(이름/전화/주소/얼굴 사진 등) 요청, 불법/유해 행위는 거절하고 안전한 대안만 제시.
 """
 
 # =========================================================
-# 8) Utilities
+# 7) Utilities
 # =========================================================
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -97,12 +102,12 @@ def safe_json_load(s: str):
             return None
     return None
 
-def ask_gpt_json_object(prompt: str) -> dict:
+def ask_gpt_json_object(prompt: str, system_prompt: str = SYSTEM_PERSONA) -> dict:
     try:
         resp = client.chat.completions.create(
             model=TEXT_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PERSONA},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
@@ -114,12 +119,12 @@ def ask_gpt_json_object(prompt: str) -> dict:
     except Exception:
         return {}
 
-def ask_gpt_text(prompt: str) -> str:
+def ask_gpt_text(prompt: str, system_prompt: str = SYSTEM_PERSONA) -> str:
     try:
         resp = client.chat.completions.create(
             model=TEXT_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PERSONA},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.5,
@@ -136,12 +141,6 @@ def normalize_analysis(x):
             "lesson_content": x.get("lesson_content", []) if isinstance(x.get("lesson_content", []), list) else [],
         }
     return {"ethics_standards": [], "curriculum_alignment": [], "lesson_content": []}
-
-def analysis_is_empty(a: dict) -> bool:
-    a = normalize_analysis(a)
-    return (len(a.get("ethics_standards", [])) == 0 and
-            len(a.get("curriculum_alignment", [])) == 0 and
-            len(a.get("lesson_content", [])) == 0)
 
 def render_bullets(items):
     if not items:
@@ -169,40 +168,13 @@ def render_analysis_box(a):
         st.markdown("### 수업 내용")
         render_bullets(a.get("lesson_content", []))
 
-def pick_national_ethics_for_topic(topic: str):
-    t = (topic or "").strip().lower()
-    for keys, picks in TOPIC_TO_NATIONAL_ETHICS:
-        if any(k.lower() in t for k in keys):
-            return picks
-    return ["프라이버시 보호", "데이터 관리", "침해 금지"]
-
-def enforce_national_ethics(topic: str, analysis: dict) -> dict:
-    a = normalize_analysis(analysis)
-    es = [str(x).strip() for x in a.get("ethics_standards", []) if str(x).strip()]
-
-    # 이미 국가 기준 용어가 들어있으면 유지 (다만 prefix 통일은 하지 않음)
-    if any(any(k in x for k in SELECTED_NATIONAL_ETHICS) for x in es):
-        return a
-
-    picks = pick_national_ethics_for_topic(topic)
-    prefix = "국가 AI 윤리기준(과기부,2020): "
-    injected = [prefix + p for p in picks]
-
-    merged = injected + es
-    out, seen = [], set()
-    for x in merged:
-        if x and x not in seen:
-            out.append(x)
-            seen.add(x)
-    a["ethics_standards"] = out[:10]
-    return a
-
 # =========================================================
-# 9) Image generation (bytes) - cached
+# 8) Image generation (bytes) - cached
 # =========================================================
 @st.cache_data(show_spinner=False)
 def generate_image_bytes_cached(user_prompt: str, model: str):
     full_prompt = f"{NO_TEXT_IMAGE_PREFIX}{user_prompt}"
+    # 1) b64_json
     try:
         r = client.images.generate(
             model=model,
@@ -217,6 +189,7 @@ def generate_image_bytes_cached(user_prompt: str, model: str):
     except Exception:
         pass
 
+    # 2) url fallback
     try:
         r = client.images.generate(model=model, prompt=full_prompt, size="1024x1024", n=1)
         url = getattr(r.data[0], "url", None)
@@ -229,7 +202,7 @@ def generate_image_bytes_cached(user_prompt: str, model: str):
         return None
 
 def clear_step_images_from_session():
-    keys = [k for k in st.session_state.keys() if str(k).startswith("step_img_") or str(k).startswith("step_img_story_") or str(k).startswith("step_img_debate")]
+    keys = [k for k in st.session_state.keys() if str(k).startswith("step_img_")]
     for k in keys:
         del st.session_state[k]
 
@@ -239,7 +212,7 @@ def clear_student_generated_images_from_session():
         del st.session_state[k]
 
 # =========================================================
-# 10) RAG: reference.txt only
+# 9) RAG: reference.txt only
 # =========================================================
 def sha256_text(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
@@ -249,6 +222,7 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if not text:
         return []
 
+    # split on blank lines
     parts, buf = [], []
     for line in text.split("\n"):
         if line.strip() == "":
@@ -260,6 +234,7 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if buf:
         parts.append("\n".join(buf).strip())
 
+    # pack
     chunks, cur = [], ""
     for p in parts:
         if len(cur) + len(p) + 2 <= max_chars:
@@ -279,6 +254,7 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if cur:
         chunks.append(cur)
 
+    # overlap merge
     final = []
     for i, c in enumerate(chunks):
         if i == 0:
@@ -295,7 +271,7 @@ def load_reference_text_cached(path_str: str, mtime: float) -> str:
     if not p.exists():
         return ""
     txt = p.read_text(encoding="utf-8", errors="ignore")
-    return txt[:1_200_000]
+    return txt[:1_200_000]  # safety cap
 
 @st.cache_data(show_spinner=False)
 def build_rag_index_cached(path_str: str, embed_model: str, mtime: float):
@@ -341,118 +317,19 @@ def rag_retrieve(query: str, index: dict, top_k: int = RAG_TOP_K) -> str:
         return ""
 
 # =========================================================
-# 11) Lesson types (3 buttons)
+# 10) Lesson types (3 buttons)
 # =========================================================
 LESSON_IMAGE_PROMPT = "이미지 프롬프트형"
 LESSON_STORY_MODE = "스토리 모드형"
 LESSON_DEEP_DEBATE = "심화 대화 토론형"
 
-# =========================================================
-# 12) Teacher feedback reflection (teacher rubric)
-# =========================================================
-def get_teacher_feedback_context() -> str:
-    ctx = (st.session_state.get("teacher_feedback_context") or "").strip()
-    return _clip(ctx, 900) if ctx else ""
+# 국가 인공지능 윤리기준(표현 고정) - analysis 출력 강제용
+NATIONAL_ETHICS_KEYS = ["프라이버시 보호", "연대성", "데이터 관리", "침해 금지", "안전성"]
 
-def ensure_analysis_filled(topic: str, lesson_type: str, rag_ctx: str, analysis: dict) -> dict:
-    a = normalize_analysis(analysis)
-    if not analysis_is_empty(a):
-        return enforce_national_ethics(topic, a)
-
-    prompt = f"""
-주제: "{topic}"
-수업유형: "{lesson_type}"
-
-[reference.txt 발췌]
-{rag_ctx if rag_ctx else "- 없음"}
-
-반드시 JSON만 출력.
-키: analysis
-analysis 내부 키:
-- ethics_standards: 문자열 리스트(최소 3개)
-  * 반드시 "국가 인공지능 윤리기준(과기부,2020)" 5개 용어를 사용
-  * 사용 가능한 용어: {SELECTED_NATIONAL_ETHICS}
-- curriculum_alignment: 문자열 리스트(최소 2개, 초등 5~6 실과/도덕 중심)
-- lesson_content: 문자열 리스트(최소 3개, 도입-활동-토론-정리 흐름)
-"""
-    data = ask_gpt_json_object(prompt)
-    if isinstance(data, dict) and "analysis" in data:
-        a2 = normalize_analysis(data.get("analysis", {}))
-    else:
-        a2 = normalize_analysis(data)
-    return enforce_national_ethics(topic, a2)
-
-def feedback_with_tags(step_story: str, answer_text: str, rag_ctx: str, extra_context: str = "") -> dict:
-    teacher_ctx = get_teacher_feedback_context()
-    prompt = f"""
-상황/활동:
-{step_story}
-
-[reference.txt 발췌]
-{rag_ctx if rag_ctx else "- 없음"}
-
-[교사 기준/관점(반영)]
-{teacher_ctx if teacher_ctx else "- (교사 입력 없음)"}
-
-[추가 맥락]
-{_clip(extra_context, 800) if extra_context else "- 없음"}
-
-[학생 답]
-{answer_text}
-
-반드시 JSON만 출력.
-키:
-- tags: 문자열 리스트(최대 3개)
-- summary: 1줄 요약
-- feedback: 단답형 피드백(핵심만)
-"""
-    data = ask_gpt_json_object(prompt)
-
-    tags = data.get("tags", [])
-    if not isinstance(tags, list):
-        tags = []
-    tags = [str(t).strip() for t in tags if str(t).strip()][:3]
-
-    return {
-        "tags": tags,
-        "summary": str(data.get("summary", "")).strip(),
-        "feedback": str(data.get("feedback", "")).strip() or "응답 불가.",
-    }
-
-def debate_next_question(topic: str, story: str, student_history: list, turn_index: int, rag_ctx: str) -> str:
-    teacher_ctx = get_teacher_feedback_context()
-    prompt = f"""
-너는 초등 고학년 토론 튜터.
-주제: "{topic}"
-
-[토론 상황]
-{story}
-
-[reference.txt 발췌]
-{rag_ctx if rag_ctx else "- 없음"}
-
-[교사 기준(가능하면 반영)]
-{teacher_ctx if teacher_ctx else "- 없음"}
-
-[학생 발언 기록]
-{json.dumps(student_history, ensure_ascii=False)}
-
-이제 {turn_index}번째 후속 질문 1개만 생성.
-원칙:
-- 한 문장 질문
-- 학생 답을 더 구체화/심화(근거/반례/대안/조건/검증)
-- 법 조항 단정 금지(약관/규정/상황 확인 관점)
-
-출력 형식: 질문 문장만
-"""
-    q = ask_gpt_text(prompt).strip()
-    return q if q else "네 주장에 대한 가장 강한 반박 1개와 그에 대한 답 1개"
-
-# =========================================================
-# 13) Lesson generators (RAG injected + national ethics enforced)
-# =========================================================
 def generate_lesson_image_prompt(topic: str, rag_ctx: str) -> dict:
     prompt = f"""
+교사용 설계 요청. (교사 관점으로 설계)
+
 초등 고학년 대상 AI 윤리교육 수업 생성.
 교사가 입력한 주제 1개만으로 수업 전체가 진행되게 구성.
 주제: "{topic}"
@@ -465,11 +342,12 @@ def generate_lesson_image_prompt(topic: str, rag_ctx: str) -> dict:
 - topic: 문자열
 - lesson_type: "{LESSON_IMAGE_PROMPT}"
 - analysis: 객체
-  - ethics_standards: 문자열 리스트(최소 3개)
-    * 반드시 "국가 인공지능 윤리기준(과기부,2020)" 5개 용어에서 선택: {SELECTED_NATIONAL_ETHICS}
+  - ethics_standards: 문자열 리스트
+    * 반드시 아래 5개 국가 인공지능 윤리기준 명칭 중에서만 선택(표현 그대로), 3~5개:
+      {", ".join(NATIONAL_ETHICS_KEYS)}
   - curriculum_alignment: 문자열 리스트(초등 5~6 실과/도덕 중심)
   - lesson_content: 문자열 리스트(도입-활동-토론-정리 요약)
-- teacher_guide: 문자열(개조식, 운영 포인트/주의점/평가 기준)
+- teacher_guide: 문자열(교사 관점 3~6개 항목 개조식)
 - steps: 리스트(길이 3)
 
 steps 규격:
@@ -491,66 +369,47 @@ steps 규격:
     data = ask_gpt_json_object(prompt)
     steps = data.get("steps", [])
     if not isinstance(steps, list) or len(steps) < 3:
-        # topic별(특히 저작권) 보장 템플릿
-        if "저작" in topic:
-            steps = [
-                {
-                    "type": "image_revision",
-                    "story": "학생이 생성형 AI로 ‘학교 캠페인 포스터용 그림(글자 없음)’을 만든다. 그림을 공유/게시하려고 하자, 이 그림의 저작권·사용권이 누구에게 있는지 논쟁이 생긴다. 먼저 프롬프트로 1차 생성, 윤리 점검 후 수정 프롬프트로 2차 생성한다.",
-                    "prompt_goal": "저작권/창작·공정 사용을 상징하는 포스터 그림(글자 없음)",
-                    "checklist_items": [
-                        "실존 인물 얼굴/이름/학교 정보 포함 여부(프라이버시 보호)",
-                        "유명 캐릭터/로고/상표 유사 여부(침해 금지)",
-                        "특정 창작자 ‘화풍 모사’처럼 보일 위험(데이터 관리/침해 금지)",
-                        "이미지 사용 목적(과제/학급 공유/온라인 게시) 구분(데이터 관리)",
-                        "출처/허락/라이선스 확인이 필요한 요소 존재 여부",
-                        "편향·차별 표현 포함 여부(연대성)",
-                        "오해/허위 정보 유발 요소(안전성)",
-                    ],
-                    "reflection_question": "어떤 위험을 줄이기 위해 프롬프트를 어떻게 바꿨는가? 2문장",
-                },
-                {
-                    "type": "dilemma",
-                    "story": "친구가 ‘너가 만든 AI 그림’을 동아리 홍보물에 쓰고 싶다고 한다. 약간 수정해서 쓰겠다고 한다.",
-                    "choice_a": "조건부 허락(출처 표기/목적 제한/수정 범위 합의)",
-                    "choice_b": "허락하지 않음(개인 과제/학급 활동에만 사용)",
-                },
-                {
-                    "type": "discussion",
-                    "story": "정리: 우리 반에서 생성형 AI 이미지의 ‘사용 규칙’과 ‘권리 존중 규칙’을 만든다.",
-                    "question": "누가 어떤 권리를 가질 수 있는지(학생/플랫폼/원저작자) 관점 3개 + 수업 규칙 3개",
-                },
-            ]
-        else:
-            steps = [
-                {
-                    "type": "image_revision",
-                    "story": f"주제 '{topic}'를 설명하는 학습 포스터 그림이 필요하다. 프롬프트로 이미지를 만들고, 윤리 기준으로 점검 후 수정한다.",
-                    "prompt_goal": f"주제 '{topic}'를 상징하는 그림(글자 없음)",
-                    "checklist_items": [
-                        "타인의 얼굴/이름/학교 정보 포함 여부",
-                        "상표/로고/캐릭터 유사 여부",
-                        "편향적 표현/고정관념 포함 여부",
-                        "위험 행동/부적절한 장면 포함 여부",
-                        "출처/허락 확인 필요 요소 존재 여부",
-                        "사용 목적(과제/공유/게시) 고려 여부",
-                    ],
-                    "reflection_question": "무엇을 왜 수정했는가? 2문장",
-                },
-                {
-                    "type": "dilemma",
-                    "story": "친구가 네가 만든 이미지를 자기 과제에도 쓰고 싶다고 한다. 일부 수정도 하겠다고 한다.",
-                    "choice_a": "조건부 허락(출처 표기/사용 목적 제한/수정 범위 합의)",
-                    "choice_b": "허락하지 않음(본인 과제에만 사용)",
-                },
-                {
-                    "type": "discussion",
-                    "story": "정리: 우리 반에서 AI로 만든 이미지를 사용할 때 지킬 규칙을 만든다.",
-                    "question": "허락/출처표기/사용 목적 기준으로 규칙 3가지",
-                },
-            ]
+        steps = [
+            {
+                "type": "image_revision",
+                "story": f"주제 '{topic}'를 설명하는 학습 그림이 필요. 프롬프트로 이미지 만들고, 윤리 기준으로 점검 후 수정.",
+                "prompt_goal": f"주제 '{topic}'를 상징하는 그림(글자 없음)",
+                "checklist_items": [
+                    "개인정보(이름/얼굴) 들어감?",
+                    "상표/로고 비슷함?",
+                    "누군가 놀림/차별 느낌?",
+                    "위험한 행동 장면?",
+                    "출처/허락 확인 필요?",
+                    "사용 목적(과제/공유) 맞춤?",
+                ],
+                "reflection_question": "무엇을 왜 고쳤나? 2문장",
+            },
+            {
+                "type": "dilemma",
+                "story": "친구가 네 이미지(또는 비슷한 이미지)를 자기 과제에도 쓰고 싶다고 함.",
+                "choice_a": "조건부 허락(출처/목적/수정 범위 약속)",
+                "choice_b": "허락하지 않음(내 과제만 사용)",
+            },
+            {
+                "type": "discussion",
+                "story": "정리: 우리 반에서 AI 이미지 사용할 때 규칙 만들기.",
+                "question": "규칙 3가지(허락/출처/목적 기준)",
+            },
+        ]
 
-    analysis = ensure_analysis_filled(topic, LESSON_IMAGE_PROMPT, rag_ctx, data.get("analysis", {}))
+    # ethics_standards fallback 보정(비어있거나 틀린 값이면 강제)
+    analysis = normalize_analysis(data.get("analysis", {}))
+    fixed = [x for x in analysis.get("ethics_standards", []) if x in NATIONAL_ETHICS_KEYS]
+    if len(fixed) < 3:
+        # topic에 따라 조금씩 가중치
+        if "저작" in topic:
+            fixed = ["데이터 관리", "침해 금지", "연대성", "안전성"]
+        elif "개인" in topic or "프라이" in topic:
+            fixed = ["프라이버시 보호", "데이터 관리", "침해 금지", "안전성"]
+        else:
+            fixed = ["안전성", "침해 금지", "데이터 관리", "연대성"]
+    analysis["ethics_standards"] = fixed[:5]
+
     return {
         "topic": str(data.get("topic", topic)).strip() or topic,
         "lesson_type": LESSON_IMAGE_PROMPT,
@@ -561,6 +420,8 @@ steps 규격:
 
 def generate_lesson_story_mode(topic: str, rag_ctx: str) -> dict:
     prompt = f"""
+교사용 설계 요청. (교사 관점으로 설계)
+
 초등 고학년 대상 AI 윤리교육 "스토리 모드" 수업 생성.
 주제: "{topic}"
 
@@ -572,8 +433,9 @@ def generate_lesson_story_mode(topic: str, rag_ctx: str) -> dict:
 - topic
 - lesson_type: "{LESSON_STORY_MODE}"
 - analysis(ethics_standards/curriculum_alignment/lesson_content)
-  * ethics_standards는 국가 인공지능 윤리기준(과기부,2020) 용어에서 선택: {SELECTED_NATIONAL_ETHICS}
-- teacher_guide(개조식)
+  - ethics_standards는 반드시 아래 5개 국가 인공지능 윤리기준 명칭 중에서만 선택(표현 그대로), 3~5개:
+    {", ".join(NATIONAL_ETHICS_KEYS)}
+- teacher_guide(교사 관점 3~6개 항목 개조식)
 - story_setup: 객체
   - setting: 배경
   - goal: 목표
@@ -602,24 +464,35 @@ def generate_lesson_story_mode(topic: str, rag_ctx: str) -> dict:
     if not isinstance(outline, list) or len(outline) < 5:
         outline = [
             {"chapter_title": "임무 시작", "learning_focus": "문제 파악/목표 설정"},
-            {"chapter_title": "단서 수집", "learning_focus": "확인해야 할 정보 찾기"},
-            {"chapter_title": "대안 설계", "learning_focus": "조건/대체안 구성"},
+            {"chapter_title": "단서 수집", "learning_focus": "확인할 정보 찾기"},
+            {"chapter_title": "대안 설계", "learning_focus": "조건/대체안 만들기"},
             {"chapter_title": "검증과 수정", "learning_focus": "리스크 점검/개선"},
-            {"chapter_title": "규칙 만들기", "learning_focus": "원칙/규칙으로 정리"},
+            {"chapter_title": "규칙 만들기", "learning_focus": "원칙/규칙 정리"},
         ]
 
     first = data.get("first_chapter", {})
     if not isinstance(first, dict) or not first.get("story") or not isinstance(first.get("options", []), list):
         first = {
             "chapter_index": 1,
-            "story": f"너는 학교 프로젝트 팀의 일원이다. 주제는 '{topic}'. 오늘 목표는 프로젝트에서 사용할 자료를 준비하는 것. "
-                     f"하지만 자료를 만들다 보니 윤리적으로 확인해야 할 문제가 생긴다. 팀원들은 빠르게 진행하자고 하고, 너는 안전하게 진행하자고 한다. "
-                     f"무엇부터 확인하고 어떻게 해결할지 선택해야 한다.",
-            "options": ["먼저 확인 목록을 만들고(허락/출처/개인정보/편향 등) 진행한다", "일단 결과물을 만들고 나중에 문제 생기면 고친다"],
-            "question": "왜 그 선택이 문제 해결에 유리한가? 2문장",
+            "story": f"너는 학교 프로젝트 팀의 학생. 주제는 '{topic}'. 오늘 목표는 자료를 준비하는 것. "
+                     f"그런데 자료를 만들다 보니 윤리적으로 확인할 점이 생김. "
+                     f"팀원은 빨리 끝내자고 하고, 너는 안전하게 하자고 함. "
+                     f"무엇부터 확인하고 어떻게 해결할지 선택 필요.",
+            "options": ["먼저 확인 목록(허락/출처/개인정보/편향) 만들고 진행", "일단 만들고 나중에 문제 생기면 고치기"],
+            "question": "왜 그 선택이 더 안전한가? 2문장",
         }
 
-    analysis = ensure_analysis_filled(topic, LESSON_STORY_MODE, rag_ctx, data.get("analysis", {}))
+    analysis = normalize_analysis(data.get("analysis", {}))
+    fixed = [x for x in analysis.get("ethics_standards", []) if x in NATIONAL_ETHICS_KEYS]
+    if len(fixed) < 3:
+        if "저작" in topic:
+            fixed = ["데이터 관리", "침해 금지", "연대성", "안전성"]
+        elif "개인" in topic or "프라이" in topic:
+            fixed = ["프라이버시 보호", "데이터 관리", "침해 금지", "안전성"]
+        else:
+            fixed = ["안전성", "침해 금지", "데이터 관리", "연대성"]
+    analysis["ethics_standards"] = fixed[:5]
+
     return {
         "topic": str(data.get("topic", topic)).strip() or topic,
         "lesson_type": LESSON_STORY_MODE,
@@ -642,7 +515,9 @@ def generate_lesson_story_mode(topic: str, rag_ctx: str) -> dict:
 
 def generate_story_next_chapter(topic: str, setup: dict, history: list, chapter_index: int, rag_ctx: str) -> dict:
     prompt = f"""
-너는 초등 고학년 AI 윤리교육 스토리 작가 겸 튜터.
+교사용 설계 요청. (교사 관점)
+초등 고학년 스토리 모드: 다음 장면 생성.
+
 주제: "{topic}"
 
 [스토리 설정]
@@ -657,7 +532,6 @@ constraints(윤리 기준): {setup.get("constraints",[])}
 [이전 진행 기록]
 {json.dumps(history, ensure_ascii=False) if history else "[]"}
 
-이제 다음 장면을 생성.
 현재 생성할 장(1~5): {chapter_index}
 
 반드시 JSON만 출력.
@@ -666,13 +540,14 @@ constraints(윤리 기준): {setup.get("constraints",[])}
 - story: 6~10문장(문제 해결형, 선택 결과 반영)
 - options: 문자열 리스트(2개)  # 다음 선택이 필요한 경우
 - question: 문자열(선택 이유 질문 1개)
-- ending: boolean
+- ending: boolean  # chapter_index==5면 true
 - debrief: 문자열  # ending=true일 때만, 배운 점 3줄 개조식
+
 규칙:
 - 폭력/공포 배제
 - 선택지는 '문제 해결 전략' 차이가 나게
 - 약관/규정/상황 확인 필요 관점 유지(법 단정 금지)
-- chapter_index==5이면 options는 빈 리스트 가능, ending=true
+- chapter_index==5이면 options는 빈 리스트 가능, ending=true로 마무리
 """
     data = ask_gpt_json_object(prompt)
     out = {
@@ -691,11 +566,13 @@ constraints(윤리 기준): {setup.get("constraints",[])}
     else:
         out["options"] = out["options"][:2]
         if not out["question"]:
-            out["question"] = "왜 그 선택이 문제 해결에 도움이 되나? 2문장"
+            out["question"] = "왜 그 선택이 더 안전한가? 2문장"
     return out
 
 def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
     prompt = f"""
+교사용 설계 요청. (교사 관점으로 설계)
+
 초등 고학년 대상 AI 윤리교육 "심화 대화 토론형" 수업 생성.
 주제: "{topic}"
 
@@ -707,16 +584,18 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
 - topic
 - lesson_type: "{LESSON_DEEP_DEBATE}"
 - analysis
-  * ethics_standards는 국가 인공지능 윤리기준(과기부,2020) 용어에서 선택: {SELECTED_NATIONAL_ETHICS}
+  - ethics_standards는 반드시 아래 5개 국가 인공지능 윤리기준 명칭 중에서만 선택(표현 그대로), 3~5개:
+    {", ".join(NATIONAL_ETHICS_KEYS)}
 - teacher_guide
 - debate_step: 객체
   - story: 토론 상황(6~9문장)
   - opening_question: 첫 주장(입장) 질문 1개
-  - constraints: 문자열 리스트(토론 규칙 4~6개)
+  - constraints: 문자열 리스트(토론 규칙 4~6개)  # 근거/반례/대안/단정 금지
   - turns: 숫자(3)
 - closing_step: 객체
-  - story
-  - question
+  - story: 정리 안내
+  - question: 최종 원칙/규칙 2~3줄
+
 주의:
 - 학생 답에 맞춰 후속 질문을 던지는 형태(코드에서 구현)
 - 폭력/공포 배제
@@ -728,19 +607,29 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
 
     if not isinstance(debate, dict) or not debate.get("story"):
         debate = {
-            "story": f"학급에서 '{topic}' 주제로 활동을 했다. 결과물을 공유하려는 의견과, 확인 후 공유하자는 의견이 갈린다. "
-                     f"너는 한 쪽 입장을 정하고 근거를 들어야 한다. 그리고 반대 입장도 고려해 타협안을 제시해야 한다.",
-            "opening_question": "너의 입장 1개와 근거 1개",
-            "constraints": ["근거 1개 이상", "반대 입장 반박 1개", "타협안/대안 1개", "단정적 법 결론 금지", "약관/규정/상황 확인 언급 가능"],
+            "story": f"학급에서 '{topic}' 주제로 활동을 했다. 결과물을 공유하자는 의견과, 확인 후 공유하자는 의견이 갈린다. "
+                     f"너는 한 쪽 입장을 정하고 근거를 말해야 한다. 반대 입장도 생각하고, 타협안도 제시해야 한다.",
+            "opening_question": "입장 1개 / 근거 1개",
+            "constraints": ["근거 1개 이상", "반대 의견 1개", "대안 1개", "단정 금지", "약관/규칙 확인 언급 가능"],
             "turns": 3,
         }
     if not isinstance(closing, dict) or not closing.get("question"):
         closing = {
             "story": "정리: 토론을 바탕으로 실행 가능한 규칙을 만든다.",
-            "question": "오늘 주제에서 지킬 원칙 3줄(허락/출처/목적 또는 안전/공정/책임 기준)",
+            "question": "규칙 3줄(허락/출처/목적 또는 안전/공정/책임 기준)",
         }
 
-    analysis = ensure_analysis_filled(topic, LESSON_DEEP_DEBATE, rag_ctx, data.get("analysis", {}))
+    analysis = normalize_analysis(data.get("analysis", {}))
+    fixed = [x for x in analysis.get("ethics_standards", []) if x in NATIONAL_ETHICS_KEYS]
+    if len(fixed) < 3:
+        if "저작" in topic:
+            fixed = ["데이터 관리", "침해 금지", "연대성", "안전성"]
+        elif "개인" in topic or "프라이" in topic:
+            fixed = ["프라이버시 보호", "데이터 관리", "침해 금지", "안전성"]
+        else:
+            fixed = ["안전성", "침해 금지", "데이터 관리", "연대성"]
+    analysis["ethics_standards"] = fixed[:5]
+
     return {
         "topic": str(data.get("topic", topic)).strip() or topic,
         "lesson_type": LESSON_DEEP_DEBATE,
@@ -748,7 +637,7 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
         "teacher_guide": str(data.get("teacher_guide", "")).strip(),
         "debate_step": {
             "story": str(debate.get("story", "")).strip(),
-            "opening_question": str(debate.get("opening_question", "")).strip() or "입장 1개와 근거 1개",
+            "opening_question": str(debate.get("opening_question", "")).strip() or "입장 1개 / 근거 1개",
             "constraints": debate.get("constraints", []) if isinstance(debate.get("constraints", []), list) else [],
             "turns": int(debate.get("turns", 3)),
         },
@@ -759,7 +648,95 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
     }
 
 # =========================================================
-# 14) Session state init
+# 11) Teacher feedback reflection (teacher rubric)
+# =========================================================
+def get_teacher_feedback_context() -> str:
+    ctx = (st.session_state.get("teacher_feedback_context") or "").strip()
+    return _clip(ctx, 900) if ctx else ""
+
+def feedback_with_tags(step_story: str, answer_text: str, rag_ctx: str, extra_context: str = "") -> dict:
+    teacher_ctx = get_teacher_feedback_context()
+    prompt = f"""
+[학생 피드백 생성]
+상황/활동:
+{step_story}
+
+[reference.txt 발췌]
+{rag_ctx if rag_ctx else "- 없음"}
+
+[교사 기준/관점(반영)]
+{teacher_ctx if teacher_ctx else "- (교사 입력 없음)"}
+
+[추가 맥락]
+{_clip(extra_context, 800) if extra_context else "- 없음"}
+
+[학생 답]
+{answer_text}
+
+반드시 JSON만 출력.
+키:
+- tags: 문자열 리스트(최대 3개)
+- summary: 1줄 요약
+- feedback: 학생 피드백 템플릿 A 또는 B를 그대로 사용(4줄, 줄바꿈 포함)
+"""
+    data = ask_gpt_json_object(prompt)
+
+    tags = data.get("tags", [])
+    if not isinstance(tags, list):
+        tags = []
+    tags = [str(t).strip() for t in tags if str(t).strip()][:3]
+
+    fb = str(data.get("feedback", "")).strip()
+    if not fb:
+        fb = "잘한 점: -\n위험 요소: -\n확인 질문: -\n다음 행동: -"
+
+    return {
+        "tags": tags,
+        "summary": str(data.get("summary", "")).strip(),
+        "feedback": fb,
+    }
+
+# =========================================================
+# 12) Debate adaptive question generator
+#   - SYSTEM_PERSONA는 2~4개 항목 개조식이라 “질문 1문장” 생성에 부적합
+#   - 여기만 시스템 프롬프트를 별도로 override
+# =========================================================
+DEBATE_Q_SYSTEM = """
+너는 초등 5~6학년 토론 튜터.
+인사말 금지.
+출력: 질문 1문장만.
+"""
+
+def debate_next_question(topic: str, story: str, student_history: list, turn_index: int, rag_ctx: str) -> str:
+    teacher_ctx = get_teacher_feedback_context()
+    prompt = f"""
+주제: "{topic}"
+
+[토론 상황]
+{story}
+
+[reference.txt 발췌]
+{rag_ctx if rag_ctx else "- 없음"}
+
+[교사 기준(가능하면 반영)]
+{teacher_ctx if teacher_ctx else "- 없음"}
+
+[학생 발언 기록]
+{json.dumps(student_history, ensure_ascii=False)}
+
+이제 {turn_index}번째 후속 질문 1개.
+원칙:
+- 학생 답을 더 구체화(근거/반례/대안/조건)
+- 단정 금지(약관/규칙/상황 확인 관점)
+- 한 문장
+"""
+    q = ask_gpt_text(prompt, system_prompt=DEBATE_Q_SYSTEM).strip()
+    if not q:
+        q = "네 주장에 대한 가장 강한 반박 1개와 그에 대한 답 1개는?"
+    return q
+
+# =========================================================
+# 13) Session state init
 # =========================================================
 default_state = {
     "mode": "👨‍🏫 교사용",
@@ -769,15 +746,19 @@ default_state = {
     "teacher_guide": "",
     "teacher_feedback_context": "",
 
+    # static steps lessons
     "steps": [],
     "current_step": 0,
+    "chat_history": [],
     "logs": [],
 
+    # story mode state
     "story_setup": {},
     "story_outline": [],
     "story_history": [],
     "story_current": {},
 
+    # debate mode state
     "debate": {},
     "closing": {},
     "debate_turn": 0,
@@ -788,20 +769,19 @@ for k, v in default_state.items():
         st.session_state[k] = v
 
 # =========================================================
-# 15) Sidebar (minimal RAG indicator + hard reset with cache clear)
+# 14) Sidebar (minimal RAG indicator)
 # =========================================================
 st.sidebar.title("🤖 AI 윤리 교육")
 
-rag_index_live = get_rag_index()
-if rag_index_live and rag_index_live.get("chunks"):
+rag_index = get_rag_index()
+if rag_index and rag_index.get("chunks"):
     st.sidebar.caption(f"📚 RAG 적용: internal reference.txt (Top-K={RAG_TOP_K})")
 else:
     st.sidebar.caption("📚 RAG 적용: internal reference.txt")
     if not Path(REFERENCE_PATH).exists():
         st.sidebar.warning("reference.txt 없음(레포에 포함 필요)")
 
-if st.sidebar.button("⚠️ 전체 초기화(캐시 포함)"):
-    st.cache_data.clear()
+if st.sidebar.button("⚠️ 전체 초기화"):
     st.session_state.clear()
     st.rerun()
 
@@ -809,74 +789,42 @@ mode = st.sidebar.radio("모드 선택", ["👨‍🏫 교사용", "🙋‍♂�
 st.session_state.mode = mode
 
 # =========================================================
-# 16) RAG helpers
-# =========================================================
-def get_rag_ctx_for_topic(tp: str) -> str:
-    if not rag_index_live:
-        return ""
-    q = f"{tp} 국가 인공지능 윤리기준 과기부 2020 프라이버시 보호 연대성 데이터 관리 침해 금지 안전성 초등 실과 도덕 수업"
-    return rag_retrieve(q, rag_index_live, top_k=RAG_TOP_K)
-
-def rag_ctx_for_step(text: str) -> str:
-    if not rag_index_live:
-        return ""
-    q = f"{st.session_state.topic} {text} 국가 인공지능 윤리기준 과기부 2020 프라이버시 보호 연대성 데이터 관리 침해 금지 안전성"
-    return rag_retrieve(q, rag_index_live, top_k=RAG_TOP_K)
-
-# =========================================================
-# 17) Teacher UI
+# 15) Teacher UI
 # =========================================================
 if mode == "👨‍🏫 교사용":
-    st.header("🛠️ 교사용 수업 생성 (주제 1개 + 수업유형 3개)")
+    st.header("🛠️ 교사용 수업 생성 (주제 1개 + 수업유형 버튼 3개)")
 
     with st.expander("📘 교사용 가이드라인(사용법)", expanded=True):
         st.markdown(
             """
 - 주제 1개 입력 → 아래 3개 버튼 중 1개로 수업 생성
-- 생성 시 ‘윤리기준/교육과정/수업 내용’을 구성
-- 분석 결과의 ‘인공지능 윤리기준’은 국가 AI 윤리기준(과기부,2020) 중 표시
-- 학생 피드백에 교사 관점 반영 가능(주제 입력칸 아래)
+- 수업 생성 시 reference.txt를 자동 참고(RAG)하여 ‘윤리기준/교육과정/수업 내용’을 구성
+- 학생 피드백에 교사 관점 반영 가능(아래 입력칸)
 - 생성 후 학생용 화면에서 동일 수업 진행
 """
         )
 
-    # (요청) 주제 입력칸
-    topic = st.text_input(
-        "수업 주제 입력",
-        value=st.session_state.topic,
-        key="topic_input",
-        placeholder="예: 저작권, 개인정보, 추천 알고리즘, 편향, 딥페이크..."
-    )
+    # (요청 반영) 주제 입력칸 아래에 교사 피드백 칸
+    topic = st.text_input("수업 주제 입력", value=st.session_state.topic, placeholder="예: 저작권, 개인정보, 추천 알고리즘, 편향, 딥페이크...")
     st.session_state.topic = topic
 
-    # (요청) 주제 입력칸 아래에 교사 피드백 기준/관점
     st.session_state.teacher_feedback_context = st.text_area(
         "🧑‍🏫 교사 피드백 기준/관점(학생 피드백에 반영)",
         value=st.session_state.teacher_feedback_context,
-        key="teacher_feedback_input",
         height=120,
-        placeholder="예) 1) 출처/허락/목적 구분 강조  2) 약관/학교 규칙 확인 언급  3) 대안 제시 가점"
+        placeholder="예) 1) 출처/허락/목적 구분 강조  2) 약관/학교 규칙 확인 언급  3) 대안 제시 가점",
     )
 
-    st.subheader("수업 유형 선택")
+    def get_rag_ctx_for_topic(tp: str) -> str:
+        if not rag_index:
+            return ""
+        q = f"{tp} 국가 인공지능 윤리기준 프라이버시 보호 연대성 데이터 관리 침해 금지 안전성 교육과정 수업 설계"
+        return rag_retrieve(q, rag_index, top_k=RAG_TOP_K)
+
     c1, c2, c3 = st.columns(3)
 
-    def reset_runtime_states():
-        st.session_state.current_step = 0
-        st.session_state.logs = []
-        st.session_state.story_setup = {}
-        st.session_state.story_outline = []
-        st.session_state.story_history = []
-        st.session_state.story_current = {}
-        st.session_state.debate = {}
-        st.session_state.closing = {}
-        st.session_state.debate_turn = 0
-        st.session_state.debate_msgs = []
-        clear_step_images_from_session()
-        clear_student_generated_images_from_session()
-
     with c1:
-        if st.button(f"1) {LESSON_IMAGE_PROMPT}", key="btn_l1"):
+        if st.button(f"1) {LESSON_IMAGE_PROMPT}"):
             if not topic.strip():
                 st.warning("주제 필요.")
             else:
@@ -887,12 +835,23 @@ if mode == "👨‍🏫 교사용":
                     st.session_state.analysis = lesson["analysis"]
                     st.session_state.teacher_guide = lesson["teacher_guide"]
                     st.session_state.steps = lesson["steps"]
-                    reset_runtime_states()
-                st.success("생성 완료.")
-                st.rerun()
+                    st.session_state.current_step = 0
+                    st.session_state.chat_history = []
+                    st.session_state.logs = []
+                    st.session_state.story_setup = {}
+                    st.session_state.story_outline = []
+                    st.session_state.story_history = []
+                    st.session_state.story_current = {}
+                    st.session_state.debate = {}
+                    st.session_state.closing = {}
+                    st.session_state.debate_turn = 0
+                    st.session_state.debate_msgs = []
+                    clear_step_images_from_session()
+                    clear_student_generated_images_from_session()
+                    st.success("생성 완료.")
 
     with c2:
-        if st.button(f"2) {LESSON_STORY_MODE}", key="btn_l2"):
+        if st.button(f"2) {LESSON_STORY_MODE}"):
             if not topic.strip():
                 st.warning("주제 필요.")
             else:
@@ -903,15 +862,23 @@ if mode == "👨‍🏫 교사용":
                     st.session_state.analysis = lesson["analysis"]
                     st.session_state.teacher_guide = lesson["teacher_guide"]
                     st.session_state.steps = []
-                    reset_runtime_states()
+                    st.session_state.current_step = 0
+                    st.session_state.chat_history = []
+                    st.session_state.logs = []
                     st.session_state.story_setup = lesson["story_setup"]
                     st.session_state.story_outline = lesson["outline"]
+                    st.session_state.story_history = []
                     st.session_state.story_current = lesson["first_chapter"]
-                st.success("생성 완료.")
-                st.rerun()
+                    st.session_state.debate = {}
+                    st.session_state.closing = {}
+                    st.session_state.debate_turn = 0
+                    st.session_state.debate_msgs = []
+                    clear_step_images_from_session()
+                    clear_student_generated_images_from_session()
+                    st.success("생성 완료.")
 
     with c3:
-        if st.button(f"3) {LESSON_DEEP_DEBATE}", key="btn_l3"):
+        if st.button(f"3) {LESSON_DEEP_DEBATE}"):
             if not topic.strip():
                 st.warning("주제 필요.")
             else:
@@ -922,11 +889,20 @@ if mode == "👨‍🏫 교사용":
                     st.session_state.analysis = lesson["analysis"]
                     st.session_state.teacher_guide = lesson["teacher_guide"]
                     st.session_state.steps = []
-                    reset_runtime_states()
+                    st.session_state.current_step = 0
+                    st.session_state.chat_history = []
+                    st.session_state.logs = []
+                    st.session_state.story_setup = {}
+                    st.session_state.story_outline = []
+                    st.session_state.story_history = []
+                    st.session_state.story_current = {}
                     st.session_state.debate = lesson["debate_step"]
                     st.session_state.closing = lesson["closing_step"]
-                st.success("생성 완료.")
-                st.rerun()
+                    st.session_state.debate_turn = 0
+                    st.session_state.debate_msgs = []
+                    clear_step_images_from_session()
+                    clear_student_generated_images_from_session()
+                    st.success("생성 완료.")
 
     if st.session_state.lesson_type:
         st.divider()
@@ -938,11 +914,11 @@ if mode == "👨‍🏫 교사용":
         with st.expander("📌 교사용 안내(자동 생성)", expanded=True):
             st.text(st.session_state.teacher_guide)
 
-    # (항상 출력) 분석 결과
-    st.divider()
-    render_analysis_box(st.session_state.analysis)
+    if st.session_state.analysis:
+        st.divider()
+        render_analysis_box(st.session_state.analysis)
 
-    # Preview sections
+    # Preview for IMAGE_PROMPT lesson
     if st.session_state.lesson_type == LESSON_IMAGE_PROMPT and st.session_state.steps:
         st.divider()
         st.subheader("📜 단계 미리보기")
@@ -959,14 +935,15 @@ if mode == "👨‍🏫 교사용":
                             st.write(f"- {it}")
                     st.write("🗣️ 질문:", s.get("reflection_question", ""))
                 elif s.get("type") == "dilemma":
-                    A, B = st.columns(2)
-                    with A:
+                    cA, cB = st.columns(2)
+                    with cA:
                         st.success("A: " + s.get("choice_a", ""))
-                    with B:
+                    with cB:
                         st.warning("B: " + s.get("choice_b", ""))
                 elif s.get("type") == "discussion":
                     st.write("🗣️ 질문:", s.get("question", ""))
 
+    # Preview for STORY_MODE
     if st.session_state.lesson_type == LESSON_STORY_MODE and st.session_state.story_current:
         st.divider()
         st.subheader("📖 스토리 모드 미리보기")
@@ -988,6 +965,7 @@ if mode == "👨‍🏫 교사용":
                 st.warning("B: " + opts[1])
             st.write("질문:", st.session_state.story_current.get("question", ""))
 
+    # Preview for DEEP_DEBATE
     if st.session_state.lesson_type == LESSON_DEEP_DEBATE and st.session_state.debate:
         st.divider()
         st.subheader("💬 심화 토론 미리보기")
@@ -1004,7 +982,7 @@ if mode == "👨‍🏫 교사용":
             st.write("정리 질문:", st.session_state.closing.get("question", ""))
 
 # =========================================================
-# 18) Student UI
+# 16) Student UI
 # =========================================================
 else:
     st.header("🙋‍♂️ 학생용 학습")
@@ -1022,6 +1000,12 @@ else:
         if st.session_state.get(key):
             st.image(st.session_state[key])
 
+    def rag_ctx_for_step(text: str) -> str:
+        if not rag_index:
+            return ""
+        q = f"{st.session_state.topic} {text} 국가 인공지능 윤리기준 프라이버시 보호 연대성 데이터 관리 침해 금지 안전성 근거"
+        return rag_retrieve(q, rag_index, top_k=RAG_TOP_K)
+
     # =====================================================
     # A) IMAGE PROMPT LESSON
     # =====================================================
@@ -1034,6 +1018,7 @@ else:
             st.success("수업 종료.")
             if st.button("처음으로(학생)", key="img_restart"):
                 st.session_state.current_step = 0
+                st.session_state.chat_history = []
                 st.session_state.logs = []
                 clear_step_images_from_session()
                 clear_student_generated_images_from_session()
@@ -1051,7 +1036,6 @@ else:
             st.divider()
             st.subheader("🎨 프롬프트 → 이미지 → 점검 → 수정")
             st.caption("글자 없는 그림만 생성(자동 적용)")
-
             st.write("목표:", step.get("prompt_goal", ""))
 
             p1_key = f"p1_{idx}"
@@ -1059,14 +1043,18 @@ else:
             img1_key = f"stu_img_{idx}_1"
             img2_key = f"stu_img_{idx}_2"
 
-            p1 = st.text_input("1차 프롬프트", value=st.session_state.get(p1_key, ""), key=p1_key)
+            p1 = st.text_input(
+                "1차 프롬프트",
+                value=st.session_state.get(p1_key, ""),
+                key=p1_key,
+                placeholder="예: child and robot studying in classroom, flat illustration",
+            )
             cA, cB = st.columns([1, 1])
             with cA:
                 if st.button("1차 이미지 생성", key=f"gen1_{idx}"):
                     if p1.strip():
                         with st.spinner("생성..."):
                             st.session_state[img1_key] = generate_image_bytes_cached(p1.strip(), IMAGE_MODEL)
-                        st.rerun()
                     else:
                         st.warning("프롬프트 입력 필요.")
             with cB:
@@ -1086,7 +1074,12 @@ else:
             default_p2 = st.session_state.get(p2_key, "")
             if not default_p2 and p1:
                 default_p2 = p1
-            p2 = st.text_input("2차 프롬프트(수정)", value=default_p2, key=p2_key)
+            p2 = st.text_input(
+                "2차 프롬프트(수정)",
+                value=default_p2,
+                key=p2_key,
+                placeholder="예: remove brand logos, no real faces, neutral representation",
+            )
 
             cC, cD = st.columns([1, 1])
             with cC:
@@ -1094,7 +1087,6 @@ else:
                     if p2.strip():
                         with st.spinner("생성..."):
                             st.session_state[img2_key] = generate_image_bytes_cached(p2.strip(), IMAGE_MODEL)
-                        st.rerun()
                     else:
                         st.warning("프롬프트 입력 필요.")
             with cD:
@@ -1106,8 +1098,8 @@ else:
             if st.session_state.get(img2_key):
                 st.image(st.session_state[img2_key], caption="2차 이미지(수정본)")
 
-            rq = step.get("reflection_question", "어떤 위험을 줄이기 위해 프롬프트를 어떻게 바꿨는가? 2문장")
-            reflection = st.text_area(f"🗣️ {rq}", key=f"ref_{idx}")
+            rq = step.get("reflection_question", "무엇을 왜 고쳤나? 2문장")
+            reflection = st.text_area(f"🗣️ {rq}", key=f"ref_{idx}", placeholder="예: 로고가 보여서 뺐고, 얼굴을 일반적으로 바꿨다...")
 
             if st.button("제출(피드백 받기)", key=f"submit_rev_{idx}"):
                 if not st.session_state.get(img1_key):
@@ -1131,7 +1123,7 @@ else:
                             st.write("태그:", ", ".join(fb["tags"]))
                         if fb.get("summary"):
                             st.write("요약:", fb["summary"])
-                        st.write("피드백:", fb["feedback"])
+                        st.text(fb["feedback"])
                     st.session_state.logs.append({
                         "timestamp": now_str(),
                         "topic": st.session_state.topic,
@@ -1151,14 +1143,14 @@ else:
 
         elif step.get("type") == "dilemma":
             st.divider()
-            A, B = st.columns(2)
-            with A:
+            c1, c2 = st.columns(2)
+            with c1:
                 st.success("A: " + step.get("choice_a", ""))
-            with B:
+            with c2:
                 st.warning("B: " + step.get("choice_b", ""))
 
             sel = st.radio("선택", ["A", "B"], horizontal=True, key=f"sel_{idx}")
-            reason = st.text_area("이유", key=f"reason_{idx}")
+            reason = st.text_area("이유", key=f"reason_{idx}", placeholder="2~4문장")
 
             if st.button("제출(피드백)", key=f"submit_dil_{idx}"):
                 if not reason.strip():
@@ -1174,7 +1166,7 @@ else:
                             st.write("태그:", ", ".join(fb["tags"]))
                         if fb.get("summary"):
                             st.write("요약:", fb["summary"])
-                        st.write("피드백:", fb["feedback"])
+                        st.text(fb["feedback"])
                     st.session_state.logs.append({
                         "timestamp": now_str(),
                         "topic": st.session_state.topic,
@@ -1193,7 +1185,7 @@ else:
         elif step.get("type") == "discussion":
             st.divider()
             st.write("질문:", step.get("question", ""))
-            opinion = st.text_area("내 답", key=f"disc_{idx}")
+            opinion = st.text_area("내 답", key=f"disc_{idx}", placeholder="3~6줄")
 
             if st.button("제출(피드백)", key=f"submit_disc_{idx}"):
                 if not opinion.strip():
@@ -1207,7 +1199,7 @@ else:
                             st.write("태그:", ", ".join(fb["tags"]))
                         if fb.get("summary"):
                             st.write("요약:", fb["summary"])
-                        st.write("피드백:", fb["feedback"])
+                        st.text(fb["feedback"])
                     st.session_state.logs.append({
                         "timestamp": now_str(),
                         "topic": st.session_state.topic,
@@ -1260,9 +1252,10 @@ else:
         st.warning("B: " + opts[1])
 
         pick = st.radio("선택", ["A", "B"], horizontal=True, key=f"story_pick_{chap_idx}")
-        q = chap.get("question", "왜 그 선택이 문제 해결에 유리한가? 2문장")
-        reason = st.text_area(f"🗣️ {q}", key=f"story_reason_{chap_idx}")
+        q = chap.get("question", "왜 그 선택이 더 안전한가? 2문장")
+        reason = st.text_area(f"🗣️ {q}", key=f"story_reason_{chap_idx}", placeholder="2~4문장")
 
+        # (요청 반영) 버튼 문구 변경: "다음 단계로"
         if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
             if not reason.strip():
                 st.warning("이유 입력 필요.")
@@ -1277,7 +1270,6 @@ else:
 
                 rag_ctx = rag_ctx_for_step(chap.get("story", ""))
                 next_idx = chap_idx + 1
-
                 with st.spinner("다음 장면 생성..."):
                     nxt = generate_story_next_chapter(
                         st.session_state.topic,
@@ -1300,7 +1292,7 @@ else:
                         st.write("태그:", ", ".join(fb["tags"]))
                     if fb.get("summary"):
                         st.write("요약:", fb["summary"])
-                    st.write("피드백:", fb["feedback"])
+                    st.text(fb["feedback"])
 
                 st.session_state.logs.append({
                     "timestamp": now_str(),
@@ -1336,6 +1328,10 @@ else:
 
         rag_ctx = rag_ctx_for_step(debate.get("story", ""))
 
+        turns = int(debate.get("turns", 3))
+        if turns != 3:
+            turns = 3
+
         if st.session_state.debate_msgs:
             st.divider()
             for m in st.session_state.debate_msgs:
@@ -1344,12 +1340,11 @@ else:
                 st.chat_message("assistant" if role == "assistant" else "user").write(content)
 
         st.divider()
-        turns = 3
 
         if st.session_state.debate_turn == 0:
             st.subheader("오프닝")
-            opening_q = debate.get("opening_question", "입장 1개와 근거 1개")
-            opening = st.text_area(opening_q, key="deb_opening")
+            opening_q = debate.get("opening_question", "입장 1개 / 근거 1개")
+            opening = st.text_area(opening_q, key="deb_opening", placeholder="3~6줄")
             if st.button("제출(후속 질문 시작)", key="deb_start"):
                 if not opening.strip():
                     st.warning("입력 필요.")
@@ -1363,7 +1358,7 @@ else:
         elif 1 <= st.session_state.debate_turn <= turns:
             t = st.session_state.debate_turn
             st.subheader(f"후속 질문 {t}/{turns}")
-            ans = st.text_area("답변", key=f"deb_ans_{t}")
+            ans = st.text_area("답변", key=f"deb_ans_{t}", placeholder="2~6줄")
             if st.button("제출", key=f"deb_submit_{t}"):
                 if not ans.strip():
                     st.warning("입력 필요.")
@@ -1382,7 +1377,7 @@ else:
             st.write(closing.get("story", ""))
             st.write("질문:", closing.get("question", ""))
 
-            closing_ans = st.text_area("최종 정리 답", key="deb_close_ans")
+            closing_ans = st.text_area("최종 정리 답", key="deb_close_ans", placeholder="2~6줄(원칙/규칙 형태)")
             if st.button("제출(최종 피드백)", key="deb_finish"):
                 if not closing_ans.strip():
                     st.warning("입력 필요.")
@@ -1398,7 +1393,7 @@ else:
                             st.write("태그:", ", ".join(fb["tags"]))
                         if fb.get("summary"):
                             st.write("요약:", fb["summary"])
-                        st.write("피드백:", fb["feedback"])
+                        st.text(fb["feedback"])
 
                     st.session_state.logs.append({
                         "timestamp": now_str(),
@@ -1415,9 +1410,6 @@ else:
                 clear_step_images_from_session()
                 st.rerun()
 
-    # -----------------------------------------------------
-    # Logs download
-    # -----------------------------------------------------
     if st.session_state.logs:
         st.divider()
         st.download_button(
@@ -1426,4 +1418,3 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
-
