@@ -1263,7 +1263,7 @@ else:
         q = chap.get("question", "왜 그 선택이 문제 해결에 유리한가? 2문장")
         reason = st.text_area(f"🗣️ {q}", key=f"story_reason_{chap_idx}")
 
-        if st.button("제출하고 다음 막으로", key=f"story_next_{chap_idx}"):
+        if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
             if not reason.strip():
                 st.warning("이유 입력 필요.")
             else:
@@ -1426,3 +1426,4 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
