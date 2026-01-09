@@ -15,15 +15,11 @@ st.set_page_config(page_title="AI 윤리 교육 (수업유형 3종)", page_icon=
 
 # =========================================================
 # 1-1) Responsive image sizing (AUTO + MAX WIDTH CAP)
-#   - 화면이 작으면 자동으로 줄어듦(100%)
-#   - 화면이 커도 최대 폭(예: 520px)을 넘지 않음
 # =========================================================
 IMAGE_MAX_WIDTH_PX = 520
-
 st.markdown(
     f"""
 <style>
-/* Streamlit image responsive + max-width cap */
 div[data-testid="stImage"] img,
 .stImage img {{
     width: 100% !important;
@@ -60,6 +56,12 @@ NO_TEXT_IMAGE_PREFIX = (
     "no watermarks, no logos, no signs, no posters with writing. "
     "No text-like shapes. Only 그림/도형/사물. "
 )
+
+# =========================================================
+# 4-1) UI-fixed text for Image Prompt lesson
+# =========================================================
+LOGO_CONTEST_GOAL = "학급 로고 제작 대회"
+LOGO_FREE_TEXT_QUESTION = "어떤 내용의 로고를 제작했나요?"
 
 # =========================================================
 # 5) OpenAI client
@@ -344,7 +346,19 @@ LESSON_IMAGE_PROMPT = "이미지 프롬프트형"
 LESSON_STORY_MODE = "스토리 모드형"
 LESSON_DEEP_DEBATE = "심화 대화 토론형"
 
+# 국가 인공지능 윤리기준(표현 고정)
 NATIONAL_ETHICS_KEYS = ["프라이버시 보호", "연대성", "데이터 관리", "침해 금지", "안전성"]
+
+def _force_image_revision_ui_text(steps: list):
+    """첫 image_revision 단계에 목표/질문을 UI 고정 문구로 강제."""
+    if not isinstance(steps, list):
+        return steps
+    for s in steps:
+        if isinstance(s, dict) and s.get("type") == "image_revision":
+            s["prompt_goal"] = LOGO_CONTEST_GOAL
+            s["reflection_question"] = LOGO_FREE_TEXT_QUESTION
+            return steps
+    return steps
 
 def generate_lesson_image_prompt(topic: str, rag_ctx: str) -> dict:
     prompt = f"""
@@ -372,10 +386,9 @@ def generate_lesson_image_prompt(topic: str, rag_ctx: str) -> dict:
 
 steps 규격:
 1) type="image_revision"
-   - story
-   - prompt_goal
-   - checklist_items: 6~9개
-   - reflection_question
+   - story: 상황
+   - prompt_goal: 목표(짧게)
+   - reflection_question: 질문 1개
 2) type="dilemma"
    - story, choice_a, choice_b
 3) type="discussion"
@@ -392,30 +405,25 @@ steps 규격:
         steps = [
             {
                 "type": "image_revision",
-                "story": f"주제 '{topic}'를 설명하는 학습 그림이 필요. 프롬프트로 이미지 만들고, 윤리 기준으로 점검 후 수정.",
-                "prompt_goal": f"주제 '{topic}'를 상징하는 그림(글자 없음)",
-                "checklist_items": [
-                    "개인정보(이름/얼굴) 들어감?",
-                    "상표/로고 비슷함?",
-                    "누군가 놀림/차별 느낌?",
-                    "위험한 행동 장면?",
-                    "출처/허락 확인 필요?",
-                    "사용 목적(과제/공유) 맞춤?",
-                ],
-                "reflection_question": "무엇을 왜 고쳤나? 2문장",
+                "story": f"학급 로고 제작 대회에 낼 로고 이미지를 만든다. 주제는 '{topic}'. 글자 없이 그림만으로 의미를 담는다.",
+                "prompt_goal": LOGO_CONTEST_GOAL,
+                "reflection_question": LOGO_FREE_TEXT_QUESTION,
             },
             {
                 "type": "dilemma",
-                "story": "친구가 네 이미지(또는 비슷한 이미지)를 자기 과제에도 쓰고 싶다고 함.",
+                "story": "친구가 네 로고(또는 비슷한 로고)를 자기 팀에도 쓰고 싶다고 한다.",
                 "choice_a": "조건부 허락(출처/목적/수정 범위 약속)",
-                "choice_b": "허락하지 않음(내 과제만 사용)",
+                "choice_b": "허락하지 않음(내 팀만 사용)",
             },
             {
                 "type": "discussion",
-                "story": "정리: 우리 반에서 AI 이미지 사용할 때 규칙 만들기.",
+                "story": "정리: 우리 반에서 AI로 만든 로고를 사용할 때 규칙 만들기.",
                 "question": "규칙 3가지(허락/출처/목적 기준)",
             },
         ]
+
+    # UI 고정 문구 강제
+    steps = _force_image_revision_ui_text(steps)
 
     analysis = normalize_analysis(data.get("analysis", {}))
     fixed = [x for x in analysis.get("ethics_standards", []) if x in NATIONAL_ETHICS_KEYS]
@@ -918,13 +926,8 @@ if mode == "👨‍🏫 교사용":
                 st.markdown(f"### 단계 {i+1} ({s.get('type','')})")
                 st.write(s.get("story", ""))
                 if s.get("type") == "image_revision":
-                    st.write("🎯 목표:", s.get("prompt_goal", ""))
-                    items = s.get("checklist_items", [])
-                    if isinstance(items, list) and items:
-                        st.write("🧾 점검 항목(예):")
-                        for it in items[:8]:
-                            st.write(f"- {it}")
-                    st.write("🗣️ 질문:", s.get("reflection_question", ""))
+                    st.write("🎯 목표:", LOGO_CONTEST_GOAL)
+                    st.write("🗣️ 질문:", LOGO_FREE_TEXT_QUESTION)
                 elif s.get("type") == "dilemma":
                     cA, cB = st.columns(2)
                     with cA:
@@ -1025,9 +1028,9 @@ else:
 
         if step.get("type") == "image_revision":
             st.divider()
-            st.subheader("🎨 프롬프트 → 이미지 → 점검 → 수정")
+            st.subheader("🎨 프롬프트 → 이미지 → 수정")
             st.caption("글자 없는 그림만 생성(자동 적용)")
-            st.write("목표:", step.get("prompt_goal", ""))
+            st.write("목표:", LOGO_CONTEST_GOAL)
 
             p1_key = f"p1_{idx}"
             p2_key = f"p2_{idx}"
@@ -1038,7 +1041,7 @@ else:
                 "1차 프롬프트",
                 value=st.session_state.get(p1_key, ""),
                 key=p1_key,
-                placeholder="예: child and robot studying in classroom, flat illustration",
+                placeholder="예: simple class emblem logo symbol, flat illustration, no text",
             )
             cA, cB = st.columns([1, 1])
             with cA:
@@ -1057,11 +1060,6 @@ else:
             if st.session_state.get(img1_key):
                 st.image(st.session_state[img1_key], caption="1차 이미지", use_container_width=True)
 
-            items = step.get("checklist_items", [])
-            if not isinstance(items, list):
-                items = []
-            picked = st.multiselect("윤리 점검 체크(해당되는 것 선택)", options=items, default=[])
-
             default_p2 = st.session_state.get(p2_key, "")
             if not default_p2 and p1:
                 default_p2 = p1
@@ -1069,7 +1067,7 @@ else:
                 "2차 프롬프트(수정)",
                 value=default_p2,
                 key=p2_key,
-                placeholder="예: remove brand logos, no real faces, neutral representation",
+                placeholder="예: make it more original, avoid famous brand style, no real logos, no text",
             )
 
             cC, cD = st.columns([1, 1])
@@ -1089,8 +1087,11 @@ else:
             if st.session_state.get(img2_key):
                 st.image(st.session_state[img2_key], caption="2차 이미지(수정본)", use_container_width=True)
 
-            rq = step.get("reflection_question", "무엇을 왜 고쳤나? 2문장")
-            reflection = st.text_area(f"🗣️ {rq}", key=f"ref_{idx}", placeholder="예: 로고가 보여서 뺐고, 얼굴을 일반적으로 바꿨다...")
+            reflection = st.text_area(
+                f"🗣️ {LOGO_FREE_TEXT_QUESTION}",
+                key=f"ref_{idx}",
+                placeholder="예: 친구와 협동을 나타내는 손 모양과 별을 넣은 로고...",
+            )
 
             if st.button("제출(피드백 받기)", key=f"submit_rev_{idx}"):
                 if not st.session_state.get(img1_key):
@@ -1103,12 +1104,11 @@ else:
                     rag_ctx = rag_ctx_for_step(step.get("story", ""))
                     answer = f"""
 [1차 프롬프트] {p1.strip()}
-[점검 체크] {", ".join(picked) if picked else "없음"}
 [2차 프롬프트] {p2.strip()}
-[수정 이유] {reflection.strip()}
+[로고 설명] {reflection.strip()}
 """.strip()
                     with st.spinner("피드백..."):
-                        fb = feedback_with_tags(step.get("story", ""), answer, rag_ctx, extra_context="이미지 제작/수정 활동")
+                        fb = feedback_with_tags(step.get("story", ""), answer, rag_ctx, extra_context="학급 로고 제작 대회 로고 제작/수정 활동")
                     with st.container(border=True):
                         if fb.get("tags"):
                             st.write("태그:", ", ".join(fb["tags"]))
@@ -1122,9 +1122,8 @@ else:
                         "step": idx + 1,
                         "type": "image_revision",
                         "p1": p1.strip(),
-                        "picked": picked,
                         "p2": p2.strip(),
-                        "reflection": reflection.strip(),
+                        "logo_desc": reflection.strip(),
                         "feedback": fb,
                     })
 
