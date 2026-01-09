@@ -14,6 +14,31 @@ import numpy as np
 st.set_page_config(page_title="AI 윤리 교육 (수업유형 3종)", page_icon="🤖", layout="wide")
 
 # =========================================================
+# 1-1) Responsive image sizing (AUTO + MAX WIDTH CAP)
+#   - 화면이 작으면 자동으로 줄어듦(100%)
+#   - 화면이 커도 최대 폭(예: 520px)을 넘지 않음
+# =========================================================
+IMAGE_MAX_WIDTH_PX = 520
+
+st.markdown(
+    f"""
+<style>
+/* Streamlit image responsive + max-width cap */
+div[data-testid="stImage"] img,
+.stImage img {{
+    width: 100% !important;
+    max-width: {IMAGE_MAX_WIDTH_PX}px !important;
+    height: auto !important;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+# =========================================================
 # 2) Models
 # =========================================================
 TEXT_MODEL = "gpt-4o"
@@ -22,7 +47,6 @@ EMBED_MODEL = "text-embedding-3-small"
 
 # =========================================================
 # 3) Internal RAG (reference.txt only)
-#   - Put reference.txt in your repo (same folder as this app), or adjust path.
 # =========================================================
 REFERENCE_PATH = "reference.txt"
 RAG_TOP_K = 4
@@ -222,7 +246,6 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if not text:
         return []
 
-    # split on blank lines
     parts, buf = [], []
     for line in text.split("\n"):
         if line.strip() == "":
@@ -234,7 +257,6 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if buf:
         parts.append("\n".join(buf).strip())
 
-    # pack
     chunks, cur = [], ""
     for p in parts:
         if len(cur) + len(p) + 2 <= max_chars:
@@ -254,7 +276,6 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if cur:
         chunks.append(cur)
 
-    # overlap merge
     final = []
     for i, c in enumerate(chunks):
         if i == 0:
@@ -271,7 +292,7 @@ def load_reference_text_cached(path_str: str, mtime: float) -> str:
     if not p.exists():
         return ""
     txt = p.read_text(encoding="utf-8", errors="ignore")
-    return txt[:1_200_000]  # safety cap
+    return txt[:1_200_000]
 
 @st.cache_data(show_spinner=False)
 def build_rag_index_cached(path_str: str, embed_model: str, mtime: float):
@@ -323,7 +344,6 @@ LESSON_IMAGE_PROMPT = "이미지 프롬프트형"
 LESSON_STORY_MODE = "스토리 모드형"
 LESSON_DEEP_DEBATE = "심화 대화 토론형"
 
-# 국가 인공지능 윤리기준(표현 고정) - analysis 출력 강제용
 NATIONAL_ETHICS_KEYS = ["프라이버시 보호", "연대성", "데이터 관리", "침해 금지", "안전성"]
 
 def generate_lesson_image_prompt(topic: str, rag_ctx: str) -> dict:
@@ -352,10 +372,10 @@ def generate_lesson_image_prompt(topic: str, rag_ctx: str) -> dict:
 
 steps 규격:
 1) type="image_revision"
-   - story: 상황(프롬프트로 이미지 만들 목적)
-   - prompt_goal: 목표
-   - checklist_items: 문자열 리스트(6~9개, 주제에 맞춤)
-   - reflection_question: 질문 1개(수정 이유)
+   - story
+   - prompt_goal
+   - checklist_items: 6~9개
+   - reflection_question
 2) type="dilemma"
    - story, choice_a, choice_b
 3) type="discussion"
@@ -397,11 +417,9 @@ steps 규격:
             },
         ]
 
-    # ethics_standards fallback 보정(비어있거나 틀린 값이면 강제)
     analysis = normalize_analysis(data.get("analysis", {}))
     fixed = [x for x in analysis.get("ethics_standards", []) if x in NATIONAL_ETHICS_KEYS]
     if len(fixed) < 3:
-        # topic에 따라 조금씩 가중치
         if "저작" in topic:
             fixed = ["데이터 관리", "침해 금지", "연대성", "안전성"]
         elif "개인" in topic or "프라이" in topic:
@@ -436,22 +454,13 @@ def generate_lesson_story_mode(topic: str, rag_ctx: str) -> dict:
   - ethics_standards는 반드시 아래 5개 국가 인공지능 윤리기준 명칭 중에서만 선택(표현 그대로), 3~5개:
     {", ".join(NATIONAL_ETHICS_KEYS)}
 - teacher_guide(교사 관점 3~6개 항목 개조식)
-- story_setup: 객체
-  - setting: 배경
-  - goal: 목표
-  - characters: 문자열 리스트(3~5)
-  - constraints: 문자열 리스트(3~6)  # 윤리 기준/주의점
-- outline: 리스트(길이 5)
-  - 각 원소: chapter_title, learning_focus
-- first_chapter: 객체
-  - chapter_index: 1
-  - story: 6~10문장(문제 해결형, 탄탄)
-  - options: 문자열 리스트(2개)  # A/B
-  - question: "선택 이유" 질문 1개
+- story_setup: setting, goal, characters(3~5), constraints(3~6)
+- outline: 리스트(길이 5) 각 원소: chapter_title, learning_focus
+- first_chapter: chapter_index=1, story(6~10문장), options(2개), question
 
 규칙:
 - 폭력/공포 배제
-- 선택은 단순 찬반이 아니라 '문제 해결 전략' 차이가 나게
+- 선택지는 문제 해결 전략 차이
 - 법 조항 단정 금지(약관/규정/상황 확인 필요)
 """
     data = ask_gpt_json_object(prompt)
@@ -536,18 +545,12 @@ constraints(윤리 기준): {setup.get("constraints",[])}
 
 반드시 JSON만 출력.
 키:
-- chapter_index: 숫자
-- story: 6~10문장(문제 해결형, 선택 결과 반영)
-- options: 문자열 리스트(2개)  # 다음 선택이 필요한 경우
-- question: 문자열(선택 이유 질문 1개)
-- ending: boolean  # chapter_index==5면 true
-- debrief: 문자열  # ending=true일 때만, 배운 점 3줄 개조식
-
-규칙:
-- 폭력/공포 배제
-- 선택지는 '문제 해결 전략' 차이가 나게
-- 약관/규정/상황 확인 필요 관점 유지(법 단정 금지)
-- chapter_index==5이면 options는 빈 리스트 가능, ending=true로 마무리
+- chapter_index
+- story(6~10문장)
+- options(2개)  # 필요 없으면 빈 리스트 가능(마지막)
+- question
+- ending(boolean)
+- debrief(ending=true일 때만, 3줄 개조식)
 """
     data = ask_gpt_json_object(prompt)
     out = {
@@ -586,15 +589,9 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
 - analysis
   - ethics_standards는 반드시 아래 5개 국가 인공지능 윤리기준 명칭 중에서만 선택(표현 그대로), 3~5개:
     {", ".join(NATIONAL_ETHICS_KEYS)}
-- teacher_guide
-- debate_step: 객체
-  - story: 토론 상황(6~9문장)
-  - opening_question: 첫 주장(입장) 질문 1개
-  - constraints: 문자열 리스트(토론 규칙 4~6개)  # 근거/반례/대안/단정 금지
-  - turns: 숫자(3)
-- closing_step: 객체
-  - story: 정리 안내
-  - question: 최종 원칙/규칙 2~3줄
+- teacher_guide(교사 관점 3~6개 항목 개조식)
+- debate_step: story(6~9문장), opening_question, constraints(4~6개), turns=3
+- closing_step: story, question(2~3줄 결과)
 
 주의:
 - 학생 답에 맞춰 후속 질문을 던지는 형태(코드에서 구현)
@@ -698,8 +695,6 @@ def feedback_with_tags(step_story: str, answer_text: str, rag_ctx: str, extra_co
 
 # =========================================================
 # 12) Debate adaptive question generator
-#   - SYSTEM_PERSONA는 2~4개 항목 개조식이라 “질문 1문장” 생성에 부적합
-#   - 여기만 시스템 프롬프트를 별도로 override
 # =========================================================
 DEBATE_Q_SYSTEM = """
 너는 초등 5~6학년 토론 튜터.
@@ -746,19 +741,16 @@ default_state = {
     "teacher_guide": "",
     "teacher_feedback_context": "",
 
-    # static steps lessons
     "steps": [],
     "current_step": 0,
     "chat_history": [],
     "logs": [],
 
-    # story mode state
     "story_setup": {},
     "story_outline": [],
     "story_history": [],
     "story_current": {},
 
-    # debate mode state
     "debate": {},
     "closing": {},
     "debate_turn": 0,
@@ -804,7 +796,6 @@ if mode == "👨‍🏫 교사용":
 """
         )
 
-    # (요청 반영) 주제 입력칸 아래에 교사 피드백 칸
     topic = st.text_input("수업 주제 입력", value=st.session_state.topic, placeholder="예: 저작권, 개인정보, 추천 알고리즘, 편향, 딥페이크...")
     st.session_state.topic = topic
 
@@ -998,7 +989,7 @@ else:
             with st.spinner("이미지 생성..."):
                 st.session_state[key] = generate_image_bytes_cached(prompt_text, IMAGE_MODEL)
         if st.session_state.get(key):
-            st.image(st.session_state[key])
+            st.image(st.session_state[key], use_container_width=True)
 
     def rag_ctx_for_step(text: str) -> str:
         if not rag_index:
@@ -1064,7 +1055,7 @@ else:
                     st.rerun()
 
             if st.session_state.get(img1_key):
-                st.image(st.session_state[img1_key], caption="1차 이미지")
+                st.image(st.session_state[img1_key], caption="1차 이미지", use_container_width=True)
 
             items = step.get("checklist_items", [])
             if not isinstance(items, list):
@@ -1096,7 +1087,7 @@ else:
                     st.rerun()
 
             if st.session_state.get(img2_key):
-                st.image(st.session_state[img2_key], caption="2차 이미지(수정본)")
+                st.image(st.session_state[img2_key], caption="2차 이미지(수정본)", use_container_width=True)
 
             rq = step.get("reflection_question", "무엇을 왜 고쳤나? 2문장")
             reflection = st.text_area(f"🗣️ {rq}", key=f"ref_{idx}", placeholder="예: 로고가 보여서 뺐고, 얼굴을 일반적으로 바꿨다...")
@@ -1255,7 +1246,6 @@ else:
         q = chap.get("question", "왜 그 선택이 더 안전한가? 2문장")
         reason = st.text_area(f"🗣️ {q}", key=f"story_reason_{chap_idx}", placeholder="2~4문장")
 
-        # (요청 반영) 버튼 문구 변경: "다음 단계로"
         if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
             if not reason.strip():
                 st.warning("이유 입력 필요.")
