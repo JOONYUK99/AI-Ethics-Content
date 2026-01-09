@@ -661,15 +661,22 @@ def get_teacher_feedback_context() -> str:
 
 def feedback_with_tags(step_story: str, answer_text: str, rag_ctx: str, extra_context: str = "") -> dict:
     teacher_ctx = get_teacher_feedback_context()
+
     prompt = f"""
-[학생 피드백 생성]
-상황/활동:
+[역할]
+너는 초등 5~6학년 AI 윤리교육 보조교사.
+
+[목표]
+- 학생 답을 바탕으로 '칭찬(잘한 점)'이 반드시 포함된 피드백을 만든다.
+- 교사가 입력한 기준/관점을 우선 반영한다.
+
+[상황/활동]
 {step_story}
 
 [reference.txt 발췌]
 {rag_ctx if rag_ctx else "- 없음"}
 
-[교사 기준/관점(반영)]
+[교사 기준/관점(반드시 반영)]
 {teacher_ctx if teacher_ctx else "- (교사 입력 없음)"}
 
 [추가 맥락]
@@ -678,12 +685,25 @@ def feedback_with_tags(step_story: str, answer_text: str, rag_ctx: str, extra_co
 [학생 답]
 {answer_text}
 
-반드시 JSON만 출력.
-키:
+[출력 규칙 - 매우 중요]
+1) 반드시 JSON만 출력.
+2) feedback는 반드시 템플릿 A만 사용(정확히 4줄, 줄바꿈 포함):
+   - 잘한 점: ...
+   - 위험 요소: ...
+   - 확인 질문: ...
+   - 다음 행동: ...
+3) '잘한 점'은 반드시 학생 답에서 실제로 한 말/행동을 근거로 1개 칭찬(구체적).
+4) 교사 기준/관점에서 최소 2개를 피드백에 반영하고, 반영한 경우 해당 줄 끝에 (교사기준: ... )로 짧게 표시.
+5) 위험 요소는 학생 답/상황에서 실제로 확인되는 것만 쓰고, 없으면 "없음"이라고 쓴다. (추측/지어내기 금지)
+6) 각 줄은 1문장 이내, 쉬운 단어 사용.
+7) summary는 1문장, tags는 0~3개.
+
+[반드시 JSON 키]
 - tags: 문자열 리스트(최대 3개)
-- summary: 1줄 요약
-- feedback: 학생 피드백 템플릿 A 또는 B를 그대로 사용(4줄, 줄바꿈 포함)
-"""
+- summary: 문자열(1문장)
+- feedback: 문자열(4줄, 줄바꿈 포함)
+""".strip()
+
     data = ask_gpt_json_object(prompt)
 
     tags = data.get("tags", [])
@@ -692,8 +712,9 @@ def feedback_with_tags(step_story: str, answer_text: str, rag_ctx: str, extra_co
     tags = [str(t).strip() for t in tags if str(t).strip()][:3]
 
     fb = str(data.get("feedback", "")).strip()
-    if not fb:
-        fb = "잘한 점: -\n위험 요소: -\n확인 질문: -\n다음 행동: -"
+    # 안전장치: 형식 깨질 때 기본 템플릿
+    if fb.count("\n") < 3:
+        fb = "잘한 점: 답에서 좋은 점을 1개 말했어.\n위험 요소: 없음\n확인 질문: 이 답을 실제로 지킬 수 있는 방법 1가지는?\n다음 행동: 오늘부터 1가지 행동을 정해 실천해 봐."
 
     return {
         "tags": tags,
@@ -1407,3 +1428,4 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
