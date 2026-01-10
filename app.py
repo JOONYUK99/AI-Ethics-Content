@@ -1013,7 +1013,9 @@ else:
         with st.spinner("이미지 생성..."):
             st.session_state[key] = generate_image_bytes_cached(prompt_text, IMAGE_MODEL)
 
-    img = st.session_state.get(key)
+    if st.session_state.get(key):
+        st.image(st.session_state[key], use_container_width=True)
+
     if img:
         # 가운데 폭을 줄여 자동으로 작게 보이도록(한눈에 보기)
         left, mid, right = st.columns([1, 2, 1])
@@ -1462,5 +1464,6 @@ if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
 
 
