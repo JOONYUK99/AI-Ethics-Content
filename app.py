@@ -89,10 +89,14 @@ SYSTEM_JSON_FEEDBACK = """
 """
 
 DEBATE_Q_SYSTEM = """
-너는 초등 5~6학년 토론 튜터.
-인사말 금지.
-출력: 질문 1문장만.
+너는 초등학교 5~6학년 담임 선생님.
+말투: 다정하고 격려하는 톤(과한 감탄/이모지 금지).
+출력 형식: 정확히 2줄(줄바꿈 1번).
+- 1줄: 짧은 칭찬 또는 공감 1문장(한 문장).
+- 2줄: 질문 1문장(한 문장, 물음표로 끝).
+금지: 인사말, 장황한 설명, 번호/불릿, 추가 문장.
 """
+
 
 # =========================================================
 # 7) Utilities
@@ -504,11 +508,32 @@ def debate_next_question(topic: str, story: str, student_history: list, turn_ind
 [학생 발언 기록]
 {json.dumps(student_history, ensure_ascii=False)}
 
-이제 {turn_index}번째 후속 질문 1개.
-원칙:
-- 학생 답을 더 구체화(근거/반례/대안/조건)
+이제 {turn_index}번째 후속 질문을 만든다.
+요구:
+- 출력은 정확히 2줄
+- 1줄: 칭찬/공감 1문장
+- 2줄: 질문 1문장(근거/반례/대안/조건 중 하나를 더 묻기)
 - 단정 금지(약관/규칙/상황 확인 관점)
-- 한 문장
+"""
+    raw = ask_gpt_text(prompt, system_prompt=DEBATE_Q_SYSTEM).strip()
+
+    # --- 2줄 강제 보정 ---
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+
+    if len(lines) == 0:
+        lines = ["좋은 관점이야.", "그 근거를 한 가지 더 말해줄래?"]
+    elif len(lines) == 1:
+        # 한 줄만 오면, 위에 공감 한 줄을 붙인다
+        lines = ["좋은 생각이야.", lines[0]]
+    else:
+        lines = lines[:2]
+
+    # 질문 줄이 물음표로 끝나도록 보정
+    if not lines[1].endswith("?"):
+        lines[1] = lines[1].rstrip(".") + "?"
+
+    return "\n".join(lines)
+
 """
     q = ask_gpt_text(prompt, system_prompt=DEBATE_Q_SYSTEM).strip()
     return q if q else "왜 그렇게 생각하나요? (근거 1개 포함)"
@@ -1493,5 +1518,6 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
 
 
