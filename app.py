@@ -1417,7 +1417,7 @@ else:
             st.subheader("오프닝")
             opening_q = debate.get("opening_question", "입장 1개 / 근거 1개")
             opening = st.text_area(opening_q, key="deb_opening", placeholder="3~6줄")
-            if st.button("제출(후속 질문 시작)", key="deb_start"):
+            if st.button("다음 대화 시작", key="deb_start"):
                 if not opening.strip():
                     st.warning("입력 필요.")
                 else:
@@ -1493,4 +1493,5 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
 
