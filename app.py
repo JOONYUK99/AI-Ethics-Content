@@ -1009,11 +1009,17 @@ else:
     st.caption(f"주제: {st.session_state.topic}  |  수업 유형: {st.session_state.lesson_type}")
 
     def show_step_illustration(key: str, prompt_text: str):
-        if key not in st.session_state:
-            with st.spinner("이미지 생성..."):
-                st.session_state[key] = generate_image_bytes_cached(prompt_text, IMAGE_MODEL)
-        if st.session_state.get(key):
-            st.image(st.session_state[key], use_container_width=True)
+    if key not in st.session_state:
+        with st.spinner("이미지 생성..."):
+            st.session_state[key] = generate_image_bytes_cached(prompt_text, IMAGE_MODEL)
+
+    img = st.session_state.get(key)
+    if img:
+        # 가운데 폭을 줄여 자동으로 작게 보이도록(한눈에 보기)
+        left, mid, right = st.columns([1, 2, 1])
+        with mid:
+            st.image(img, use_container_width=True)
+
 
     def rag_ctx_for_step(text: str) -> str:
         if not rag_index:
@@ -1263,58 +1269,86 @@ else:
         st.warning("B: " + opts[1])
 
         pick = st.radio("선택", ["A", "B"], horizontal=True, key=f"story_pick_{chap_idx}")
-        q = chap.get("question", "왜 그 선택이 더 안전한가? 2문장")
-        reason = st.text_area(f"🗣️ {q}", key=f"story_reason_{chap_idx}", placeholder="2~4문장")
 
-        if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
-            if not reason.strip():
-                st.warning("이유 입력 필요.")
-            else:
-                choice_text = opts[0] if pick == "A" else opts[1]
-                st.session_state.story_history.append({
-                    "chapter_index": chap_idx,
-                    "story": chap.get("story", ""),
-                    "choice": f"{pick}: {choice_text}",
-                    "reason": reason.strip(),
-                })
+# 2단 질문 고정
+choice_label = "A" if pick == "A" else "B"
+q1 = f"왜 {choice_label}를 골랐나요?"
+q2 = "왜 그렇게 생각하나요?"
 
-                rag_ctx = rag_ctx_for_step(chap.get("story", ""))
-                next_idx = chap_idx + 1
-                with st.spinner("다음 장면 생성..."):
-                    nxt = generate_story_next_chapter(
-                        st.session_state.topic,
-                        st.session_state.story_setup,
-                        st.session_state.story_history,
-                        next_idx,
-                        rag_ctx=rag_ctx
-                    )
-                st.session_state.story_current = nxt
+reason_choice = st.text_area(
+    f"🗣️ {q1}",
+    key=f"story_reason_choice_{chap_idx}",
+    placeholder="1~2문장",
+)
 
-                with st.spinner("피드백..."):
-                    fb = feedback_with_tags(
-                        chap.get("story", ""),
-                        f"선택: {pick} / {choice_text}\n이유: {reason.strip()}",
-                        rag_ctx=rag_ctx,
-                        extra_context="스토리 모드 진행"
-                    )
-                with st.container(border=True):
-                    if fb.get("tags"):
-                        st.write("태그:", ", ".join(fb["tags"]))
-                    if fb.get("summary"):
-                        st.write("요약:", fb["summary"])
-                    st.text(fb["feedback"])
+reason_why = st.text_area(
+    f"🗣️ {q2}",
+    key=f"story_reason_why_{chap_idx}",
+    placeholder="2~4문장(근거/조건/대안 포함하면 더 좋음)",
+)
 
-                st.session_state.logs.append({
-                    "timestamp": now_str(),
-                    "topic": st.session_state.topic,
-                    "lesson_type": st.session_state.lesson_type,
-                    "chapter": chap_idx,
-                    "choice": pick,
-                    "reason": reason.strip(),
-                    "feedback": fb,
-                })
+# (요청 반영) 버튼 문구: "다음 단계로"
+if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
+    if not reason_choice.strip():
+        st.warning("첫 번째 질문(선택 이유) 입력 필요.")
+    elif not reason_why.strip():
+        st.warning("두 번째 질문(왜 그렇게 생각하는지) 입력 필요.")
+    else:
+        choice_text = opts[0] if pick == "A" else opts[1]
 
-                st.rerun()
+        # history에 2단 답을 함께 저장(기존 구조 유지 위해 reason에 합쳐 저장)
+        combined_reason = f"[선택 이유] {reason_choice.strip()}\n[생각 근거] {reason_why.strip()}"
+
+        st.session_state.story_history.append({
+            "chapter_index": chap_idx,
+            "story": chap.get("story", ""),
+            "choice": f"{pick}: {choice_text}",
+            "reason": combined_reason,
+        })
+
+        rag_ctx = rag_ctx_for_step(chap.get("story", ""))
+        next_idx = chap_idx + 1
+        with st.spinner("다음 장면 생성..."):
+            nxt = generate_story_next_chapter(
+                st.session_state.topic,
+                st.session_state.story_setup,
+                st.session_state.story_history,
+                next_idx,
+                rag_ctx=rag_ctx
+            )
+        st.session_state.story_current = nxt
+
+        # 피드백 입력도 2단 답을 함께 전달
+        answer_for_feedback = f"선택: {pick} / {choice_text}\n{combined_reason}"
+
+        with st.spinner("피드백..."):
+            fb = feedback_with_tags(
+                chap.get("story", ""),
+                answer_for_feedback,
+                rag_ctx=rag_ctx,
+                extra_context="스토리 모드 진행"
+            )
+
+        with st.container(border=True):
+            if fb.get("tags"):
+                st.write("태그:", ", ".join(fb["tags"]))
+            if fb.get("summary"):
+                st.write("요약:", fb["summary"])
+            st.text(fb["feedback"])
+
+        st.session_state.logs.append({
+            "timestamp": now_str(),
+            "topic": st.session_state.topic,
+            "lesson_type": st.session_state.lesson_type,
+            "chapter": chap_idx,
+            "choice": pick,
+            "choice_text": choice_text,
+            "reason_choice": reason_choice.strip(),
+            "reason_why": reason_why.strip(),
+            "feedback": fb,
+        })
+
+        st.rerun()
 
     # =====================================================
     # C) DEEP DEBATE LESSON
@@ -1428,4 +1462,5 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
 
