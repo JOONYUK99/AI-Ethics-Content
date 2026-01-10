@@ -534,11 +534,6 @@ def debate_next_question(topic: str, story: str, student_history: list, turn_ind
 
     return "\n".join(lines)
 
-"""
-    q = ask_gpt_text(prompt, system_prompt=DEBATE_Q_SYSTEM).strip()
-    return q if q else "왜 그렇게 생각하나요? (근거 1개 포함)"
-
-
 # =========================================================
 # 11) Lesson generators
 # =========================================================
