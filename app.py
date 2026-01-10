@@ -240,11 +240,12 @@ def clear_student_generated_images_from_session():
         del st.session_state[k]
 
 
-def show_step_illustration(key: str, prompt_text: str, size: str = "small"):
+def show_step_illustration(key: str, prompt_text: str, size: str = "tiny"):
     """
     size:
-      - "small": 중앙 좁은 컬럼에 표시(학생 화면에서 한눈에)
-      - "medium": 좌측 컬럼에 표시
+      - "tiny": 아주 작게 (권장)
+      - "small": 작게
+      - "medium": 보통
       - "full": 전체 폭
     """
     if key not in st.session_state:
@@ -255,16 +256,24 @@ def show_step_illustration(key: str, prompt_text: str, size: str = "small"):
     if not img:
         return
 
+    # 원하는 만큼 더 줄이려면 숫자(픽셀)만 더 낮추면 됩니다.
+    width_map = {
+        "tiny": 200,     # <<< "완전 줄여" 기본값
+        "small": 320,
+        "medium": 460,
+    }
+
     if size == "full":
         st.image(img, use_container_width=True)
-    elif size == "medium":
-        c1, c2 = st.columns([2, 3])
-        with c1:
-            st.image(img, use_container_width=True)
-    else:
-        c1, c2, c3 = st.columns([1, 2, 1])
-        with c2:
-            st.image(img, use_container_width=True)
+        return
+
+    width = width_map.get(size, 320)
+
+    # 중앙 정렬 + 픽셀 고정 폭
+    c1, c2, c3 = st.columns([2, 1, 2])
+    with c2:
+        st.image(img, width=width)
+
 
 
 # =========================================================
@@ -1484,3 +1493,4 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
