@@ -765,7 +765,7 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
     prompt = f"""
 교사용 설계 요청. (교사 관점으로 설계)
 
-초등 고학년 대상 AI 윤리교육 "심화 대화 토론형" 수업 생성.
+초등 고학년 대상 AI 윤리교육 "심화 대화 토론형(딜레마 기반)" 수업 생성.
 주제: "{topic}"
 
 [반드시 포함할 국가 인공지능 윤리기준(명칭 고정)]
@@ -774,13 +774,30 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
 [reference.txt 발췌]
 {rag_ctx if rag_ctx else "- 없음"}
 
+[중요: 딜레마 토론 구성 규칙]
+- reference.txt 발췌 안에 "사례01~사례05"가 있으면, 그 중 1개를 반드시 골라 토론을 구성.
+- 선택한 사례의 제목/요약을 debate_step.case_title / debate_step.case_summary에 넣기.
+- 선택한 사례를 기반으로 A/B 선택지를 debate_step.choice_a / debate_step.choice_b에 넣기.
+- debate_step.opening_question은 반드시: "A/B 중 무엇을 선택하고, 왜 그렇게 생각하나요?" 형태.
+- debate_step.story는 사례 설명(2~3문장) + 토론 상황 안내(2~3문장)로 구성.
+- constraints는 토론 규칙 4~6개(근거/반대의견/대안/단정 금지/규칙 확인 등).
+- turns는 3 고정.
+
 반드시 JSON만 출력.
 키:
 - topic
 - lesson_type: "{LESSON_DEEP_DEBATE}"
 - analysis(ethics_standards/curriculum_alignment/lesson_content)
 - teacher_guide(교사 관점 3~6개 항목 개조식)
-- debate_step: 객체(story, opening_question, constraints, turns=3)
+- debate_step: 객체
+  - case_title: 문자열
+  - case_summary: 문자열(2~3문장)
+  - story: 문자열
+  - choice_a: 문자열
+  - choice_b: 문자열
+  - opening_question: 문자열
+  - constraints: 문자열 리스트
+  - turns: 숫자(3)
 - closing_step: 객체(story, question)
 
 규칙:
@@ -793,19 +810,42 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
     debate = data.get("debate_step", {})
     closing = data.get("closing_step", {})
 
+    # --------- debate fallback (딜레마 기본값) ----------
     if not isinstance(debate, dict) or not debate.get("story"):
         debate = {
-            "story": f"학급에서 '{topic}' 주제로 활동을 했다. 결과물을 공유하자는 의견과, 확인 후 공유하자는 의견이 갈린다. "
-                     f"너는 한 쪽 입장을 정하고 근거를 말해야 한다. 반대 입장도 생각하고, 타협안도 제시해야 한다.",
-            "opening_question": "입장 1개 / 근거 1개",
-            "constraints": ["근거 1개 이상", "반대 의견 1개", "대안 1개", "단정 금지", "약관/규칙 확인 언급 가능"],
+            "case_title": f"{topic} 관련 사례",
+            "case_summary": f"'{topic}' 활동에서 공유/사용 과정에서 확인할 점이 생겼다. "
+                            f"편의와 안전 사이에서 선택이 필요하다.",
+            "story": f"학급에서 '{topic}' 주제로 활동을 했다. 결과물을 공유하려고 하는데, "
+                     f"확인 없이 올리자는 의견과 확인 후 올리자는 의견이 갈린다. "
+                     f"너는 한 가지를 선택하고 이유를 말해야 한다.",
+            "choice_a": "조건부 공유(출처/허락/목적/공개범위 확인 후 공유)",
+            "choice_b": "공유 보류(확인 전까지 공유하지 않고 대안을 찾기)",
+            "opening_question": "A/B 중 무엇을 선택하고, 왜 그렇게 생각하나요?",
+            "constraints": ["근거 1개 이상", "반대 의견 1개", "대안 1개", "단정 금지", "약관/학교 규칙 확인 언급"],
             "turns": 3,
         }
 
+    # opening_question 강제 보정
+    oq = str(debate.get("opening_question", "")).strip()
+    if not oq:
+        oq = "A/B 중 무엇을 선택하고, 왜 그렇게 생각하나요?"
+    if "왜" not in oq:
+        oq = "A/B 중 무엇을 선택하고, 왜 그렇게 생각하나요?"
+
+    # choice_a / choice_b 보정
+    ca = str(debate.get("choice_a", "")).strip()
+    cb = str(debate.get("choice_b", "")).strip()
+    if not ca:
+        ca = "A 선택(조건부 진행: 허락/출처/목적 확인)"
+    if not cb:
+        cb = "B 선택(보류/대안 찾기)"
+
+    # closing fallback
     if not isinstance(closing, dict) or not closing.get("question"):
         closing = {
             "story": "정리: 토론을 바탕으로 실행 가능한 규칙을 만든다.",
-            "question": "규칙 3줄(허락/출처/목적 또는 안전/공정/책임 기준)",
+            "question": "우리 반 규칙 3줄(허락/출처/목적 또는 안전/공정/책임 기준)",
         }
 
     analysis = ensure_analysis_defaults(topic, data.get("analysis", {}))
@@ -816,8 +856,12 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
         "analysis": analysis,
         "teacher_guide": str(data.get("teacher_guide", "")).strip(),
         "debate_step": {
+            "case_title": str(debate.get("case_title", "")).strip(),
+            "case_summary": str(debate.get("case_summary", "")).strip(),
             "story": str(debate.get("story", "")).strip(),
-            "opening_question": str(debate.get("opening_question", "")).strip() or "입장 1개 / 근거 1개",
+            "choice_a": ca,
+            "choice_b": cb,
+            "opening_question": oq,
             "constraints": debate.get("constraints", []) if isinstance(debate.get("constraints", []), list) else [],
             "turns": 3,
         },
@@ -886,7 +930,7 @@ st.session_state.mode = mode
 def get_rag_ctx_for_topic(tp: str) -> str:
     if not rag_index:
         return ""
-    q = f"{tp} 국가 인공지능 윤리기준 프라이버시 보호 연대성 데이터 관리 침해 금지 안전성 교육과정 수업 설계"
+    q = f"{tp} 사례01 사례02 사례03 사례04 사례05 딜레마 토론 국가 인공지능 윤리기준"
     return rag_retrieve(q, rag_index, top_k=RAG_TOP_K)
 
 
@@ -1513,6 +1557,7 @@ else:
             file_name="ethics_learning_log.json",
             mime="application/json",
         )
+
 
 
 
