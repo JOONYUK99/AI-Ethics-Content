@@ -191,7 +191,7 @@ def render_analysis_box(a):
         render_bullets(a.get("lesson_content", []))
 
 # ---- Story line rendering (한줄에 하나씩) ----
-def split_to_lines(text: str, max_lines: int = 12) -> list:
+def split_to_lines(text: str, max_lines: int = 50) -> list:
     t = (text or "").strip()
     if not t:
         return []
@@ -200,12 +200,8 @@ def split_to_lines(text: str, max_lines: int = 12) -> list:
     lines = [p.strip() for p in parts if p and p.strip()]
     return lines[:max_lines]
 
-def trim_story(text: str, max_sentences: int = 5) -> str:
-    lines = split_to_lines(text, max_lines=max_sentences)
-    return " ".join(lines) if lines else (text or "").strip()
-
 def render_story_box(text: str):
-    lines = split_to_lines(text, max_lines=20)
+    lines = split_to_lines(text, max_lines=60)
     if not lines:
         return
     with st.container(border=True):
@@ -217,6 +213,7 @@ def render_story_box(text: str):
 @st.cache_data(show_spinner=False)
 def generate_image_bytes_cached(user_prompt: str, model: str):
     full_prompt = f"{NO_TEXT_IMAGE_PREFIX}{user_prompt}"
+    # 1) b64_json
     try:
         r = client.images.generate(
             model=model,
@@ -231,6 +228,7 @@ def generate_image_bytes_cached(user_prompt: str, model: str):
     except Exception:
         pass
 
+    # 2) url fallback
     try:
         r = client.images.generate(model=model, prompt=full_prompt, size="1024x1024", n=1)
         url = getattr(r.data[0], "url", None)
@@ -252,6 +250,11 @@ def clear_student_generated_images_from_session():
     for k in keys:
         del st.session_state[k]
 
+def clear_story_prompt_assets():
+    for k in ["story_act1_prompt", "story_act1_prompt_final", "story_act1_img"]:
+        if k in st.session_state:
+            del st.session_state[k]
+
 # =========================================================
 # 9) RAG: reference.txt only
 # =========================================================
@@ -263,6 +266,7 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if not text:
         return []
 
+    # split on blank lines
     parts, buf = [], []
     for line in text.split("\n"):
         if line.strip() == "":
@@ -274,6 +278,7 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if buf:
         parts.append("\n".join(buf).strip())
 
+    # pack
     chunks, cur = [], ""
     for p in parts:
         if len(cur) + len(p) + 2 <= max_chars:
@@ -293,6 +298,7 @@ def chunk_text(text: str, max_chars: int = 900, overlap: int = 160):
     if cur:
         chunks.append(cur)
 
+    # overlap merge
     final = []
     for i, c in enumerate(chunks):
         if i == 0:
@@ -309,7 +315,7 @@ def load_reference_text_cached(path_str: str, mtime: float) -> str:
     if not p.exists():
         return ""
     txt = p.read_text(encoding="utf-8", errors="ignore")
-    return txt[:1_200_000]
+    return txt[:1_200_000]  # safety cap
 
 @st.cache_data(show_spinner=False)
 def build_rag_index_cached(path_str: str, embed_model: str, mtime: float):
@@ -355,7 +361,7 @@ def rag_retrieve(query: str, index: dict, top_k: int = RAG_TOP_K) -> str:
         return ""
 
 # =========================================================
-# 10) Lesson types
+# 10) Lesson types / standards
 # =========================================================
 LESSON_IMAGE_PROMPT = "이미지 프롬프트형"
 LESSON_STORY_MODE = "스토리 모드형"
@@ -383,7 +389,68 @@ def ensure_analysis_defaults(topic: str, analysis_obj) -> dict:
     return a
 
 # =========================================================
-# 11) Lesson generators
+# 11) Fixed Story Mode (요청하신 브러시 스토리 고정)
+# =========================================================
+FIXED_STORY_TITLE = "인공지능 화가 '브러시'와 비밀의 그림"
+
+FIXED_STORY_CHAPTERS = [
+    {
+        "chapter_index": 1,
+        "chapter_title": "1단계: 인공지능의 편리함을 발견하다",
+        "story": (
+            "하늘이는 학교 미술 숙제를 하다가, 무엇이든 그려주는 인공지능 화가 '브러시'를 알게 되었어요. "
+            "하늘이가 “멋진 숲속 마을을 그려줘!”라고 말하자, 브러시는 순식간에 화려한 그림을 만들어 줬어요. "
+            "하늘이는 그 그림을 자신이 그린 것처럼 제출했고, 칭찬도 받았답니다."
+        ),
+        "question": "생각해보기: 내가 직접 그리지 않은 그림을 내 이름으로 내도 괜찮을까요?",
+        "act1_prompt_activity": True,
+        "prompt_activity_desc": "브러시에게 그려달라고 할 ‘숲속 마을’ 이미지를 글자 없이 그리도록 프롬프트를 만들어 보세요.",
+    },
+    {
+        "chapter_index": 2,
+        "chapter_title": "2단계: 작가의 노력을 알게 되다",
+        "story": (
+            "어느 날, 하늘이는 학교 게시판에서 유명 동화 작가의 원본 그림을 보고 깜짝 놀랐어요. "
+            "브러시가 그려준 그림과 아주 비슷했거든요. "
+            "알고 보니 브러시는 작가가 오래 노력해 만든 그림을 허락 없이 학습해 흉내 내고 있었어요."
+        ),
+        "question": "생각해보기: 인공지능은 누구의 도움으로 그림을 그릴 수 있는 걸까요?",
+    },
+    {
+        "chapter_index": 3,
+        "chapter_title": "3단계: 딜레마 - 허락받지 않은 학습",
+        "story": (
+            "하늘이는 작가가 ‘내 그림이 허락 없이 쓰였다’는 말을 듣고 속상해한다는 소식을 들었어요. "
+            "하지만 짝꿍은 “인공지능이 공부하는 건데 뭐가 문제야? 편하면 그만이지!”라고 말해요. "
+            "하늘이는 편리함과 공정함 사이에서 고민이 커졌어요."
+        ),
+        "question": "생각해보기: 작가의 허락 없이 그림을 학습시키는 것은 정당한 일일까요?",
+    },
+    {
+        "chapter_index": 4,
+        "chapter_title": "4단계: 저작권의 규칙을 배우다",
+        "story": (
+            "선생님은 하늘이에게 ‘저작권’에 대해 알려주셨어요. "
+            "“남이 만든 소중한 작품을 쓸 때는 만든 이의 노력을 존중해야 해. 허락을 받거나 출처를 밝혀야 해.” "
+            "하늘이는 브러시가 작가의 권리를 지키지 못했음을 깨달았어요."
+        ),
+        "question": "생각해보기: 인공지능을 사용하면서 저작권을 지킬 수 있는 방법은 무엇일까요?",
+    },
+    {
+        "chapter_index": 5,
+        "chapter_title": "5단계: 올바른 인공지능 사용자가 되다",
+        "story": (
+            "하늘이는 작가에게 사과 편지를 쓰고, 앞으로 인공지능을 쓸 때는 ‘내가 만든 부분’과 ‘도움 받은 부분’을 솔직하게 밝히기로 했어요. "
+            "이제 하늘이는 편리함을 누리면서도 다른 사람의 노력을 소중히 여기는 멋진 어린이가 되었답니다."
+        ),
+        "question": "생각해보기: 인공지능과 사람이 함께 행복해지려면 어떤 약속이 필요할까요?",
+        "ending": True,
+        "debrief": "배운 점: 1) 남의 작품은 허락/출처가 필요해요.\n배운 점: 2) AI도 누군가의 자료로 배워요.\n배운 점: 3) 사용 목적과 공개범위를 먼저 확인해요.",
+    },
+]
+
+# =========================================================
+# 12) Lesson generators
 # =========================================================
 def generate_lesson_image_prompt(topic: str, rag_ctx: str) -> dict:
     prompt = f"""
@@ -460,155 +527,34 @@ steps[2] discussion: story, question
         "steps": steps[:3],
     }
 
-def generate_lesson_story_mode(topic: str, rag_ctx: str) -> dict:
-    prompt = f"""
-교사용 설계 요청. (교사 관점)
+def generate_lesson_story_mode_fixed(topic: str) -> dict:
+    # 고정 스토리(브러시)로 진행
+    analysis = ensure_analysis_defaults("저작권", {})
+    teacher_guide = "\n".join([
+        "- 1막은 ‘편리함’에 끌린 선택을 다루고, 출처/허락 개념을 가볍게 던진다.",
+        "- 2~3막에서 ‘누구의 노력으로 학습했는가’와 ‘허락’ 딜레마를 중심으로 질문한다.",
+        "- 4막에서 저작권(남의 작품 존중/허락/출처)을 학생 언어로 정리한다.",
+        "- 5막에서 ‘내가 한 것/AI가 도운 것’ 구분과 공개범위 약속으로 마무리한다.",
+    ])
 
-주제: "{topic}"
+    outline = [
+        {"chapter_title": FIXED_STORY_CHAPTERS[0]["chapter_title"], "learning_focus": "편리함 vs 정직"},
+        {"chapter_title": FIXED_STORY_CHAPTERS[1]["chapter_title"], "learning_focus": "노력/출처"},
+        {"chapter_title": FIXED_STORY_CHAPTERS[2]["chapter_title"], "learning_focus": "허락 딜레마"},
+        {"chapter_title": FIXED_STORY_CHAPTERS[3]["chapter_title"], "learning_focus": "저작권 규칙"},
+        {"chapter_title": FIXED_STORY_CHAPTERS[4]["chapter_title"], "learning_focus": "약속/실천"},
+    ]
 
-[반드시 포함할 국가 인공지능 윤리기준(명칭 고정)]
-{", ".join(NATIONAL_ETHICS_KEYS)}
-
-[reference.txt 발췌]
-{rag_ctx if rag_ctx else "- 없음"}
-
-중요:
-- 스토리는 5막으로 나눠서 1막씩 진행.
-- 각 막의 story는 3~5문장으로 짧게(빠르게 전개).
-
-반드시 JSON만 출력.
-키:
-- topic
-- lesson_type: "{LESSON_STORY_MODE}"
-- analysis(ethics_standards/curriculum_alignment/lesson_content)
-- teacher_guide
-- story_setup(setting, goal, characters, constraints)
-- outline: 5막(각 chapter_title, learning_focus)
-- first_chapter:
-  - chapter_index: 1
-  - story: 3~5문장(짧게)
-  - options: 2개
-  - question: 반드시 "왜 그렇게 생각하나요?" 포함
-
-규칙:
-- 폭력/공포 배제
-- 선택은 해결 전략 차이
-- 법 단정 금지(약관/규정/상황 확인 필요)
-"""
-    data = ask_gpt_json_object(prompt, system_prompt=SYSTEM_JSON_DESIGNER)
-
-    setup = data.get("story_setup", {})
-    if not isinstance(setup, dict):
-        setup = {}
-
-    outline = data.get("outline", [])
-    if not isinstance(outline, list) or len(outline) < 5:
-        outline = [
-            {"chapter_title": "임무 시작", "learning_focus": "문제 파악"},
-            {"chapter_title": "단서 수집", "learning_focus": "확인할 정보"},
-            {"chapter_title": "대안 선택", "learning_focus": "조건/대안"},
-            {"chapter_title": "검증", "learning_focus": "위험 줄이기"},
-            {"chapter_title": "규칙", "learning_focus": "정리/약속"},
-        ]
-
-    first = data.get("first_chapter", {})
-    if not isinstance(first, dict) or not first.get("story") or not isinstance(first.get("options", []), list):
-        first = {
-            "chapter_index": 1,
-            "story": f"학교 발표 준비가 시작됐다. 주제는 '{topic}'이다. "
-                     "친구가 사진과 이름을 넣자고 한다. 온라인 공개 가능성도 있어 걱정된다.",
-            "options": ["허락/공개범위를 먼저 확인하고 대안을 찾기", "일단 넣고 나중에 문제가 생기면 빼기"],
-            "question": "왜 그렇게 생각하나요? (2문장)",
-        }
-
-    story_txt = trim_story(str(first.get("story", "")).strip(), max_sentences=5)
-
-    q = str(first.get("question", "")).strip()
-    if "왜 그렇게 생각" not in q:
-        q = "왜 그렇게 생각하나요? (2문장)"
-
-    analysis = ensure_analysis_defaults(topic, data.get("analysis", {}))
     return {
-        "topic": str(data.get("topic", topic)).strip() or topic,
+        "topic": str(topic).strip() or "저작권",
         "lesson_type": LESSON_STORY_MODE,
         "analysis": analysis,
-        "teacher_guide": str(data.get("teacher_guide", "")).strip(),
-        "story_setup": {
-            "setting": str(setup.get("setting", "학교 프로젝트")).strip(),
-            "goal": str(setup.get("goal", f"주제 '{topic}'를 안전하고 공정하게 완성")).strip(),
-            "characters": setup.get("characters", ["나", "팀원", "교사"]) if isinstance(setup.get("characters", []), list) else ["나", "팀원", "교사"],
-            "constraints": setup.get("constraints", ["허락/출처 확인", "개인정보 보호", "공개범위 확인"]) if isinstance(setup.get("constraints", []), list) else ["허락/출처 확인", "개인정보 보호", "공개범위 확인"],
-        },
-        "outline": outline[:5],
-        "first_chapter": {
-            "chapter_index": 1,
-            "story": story_txt,
-            "options": first.get("options", [])[:2],
-            "question": q,
-        },
+        "teacher_guide": teacher_guide,
+        "story_title": FIXED_STORY_TITLE,
+        "outline": outline,
+        "chapters": FIXED_STORY_CHAPTERS,
+        "first_chapter": FIXED_STORY_CHAPTERS[0],
     }
-
-def generate_story_next_chapter(topic: str, setup: dict, history: list, chapter_index: int, rag_ctx: str) -> dict:
-    prompt = f"""
-교사용 설계 요청. (교사 관점)
-초등 고학년 스토리 모드: 다음 장면 생성.
-
-주제: "{topic}"
-
-[스토리 설정]
-setting: {setup.get("setting","")}
-goal: {setup.get("goal","")}
-characters: {setup.get("characters",[])}
-constraints: {setup.get("constraints",[])}
-
-[reference.txt 발췌]
-{rag_ctx if rag_ctx else "- 없음"}
-
-[이전 진행 기록]
-{json.dumps(history, ensure_ascii=False) if history else "[]"}
-
-현재 생성할 장(1~5): {chapter_index}
-
-중요:
-- 각 막 story는 3~5문장으로 짧게(빠르게 전개).
-
-반드시 JSON만 출력.
-키:
-- chapter_index
-- story: 3~5문장(짧게)
-- options: 2개(5막이면 빈 리스트 가능)
-- question: 반드시 "왜 그렇게 생각하나요?" 포함
-- ending: boolean
-- debrief: ending=true일 때만(3줄 개조식)
-
-규칙:
-- 폭력/공포 배제
-- 선택지는 해결 전략 차이
-- 법 단정 금지(약관/규정/상황 확인 필요)
-"""
-    data = ask_gpt_json_object(prompt, system_prompt=SYSTEM_JSON_DESIGNER)
-
-    out = {
-        "chapter_index": int(data.get("chapter_index", chapter_index)),
-        "story": trim_story(str(data.get("story", "")).strip(), max_sentences=5),
-        "options": data.get("options", []) if isinstance(data.get("options", []), list) else [],
-        "question": str(data.get("question", "")).strip(),
-        "ending": bool(data.get("ending", False)),
-        "debrief": str(data.get("debrief", "")).strip(),
-    }
-
-    if not out["story"]:
-        out["story"] = "다음 장면 생성 실패. 다시 시도 필요."
-
-    if out["chapter_index"] >= 5:
-        out["ending"] = True
-        out["options"] = out["options"][:2] if isinstance(out["options"], list) else []
-    else:
-        out["options"] = out["options"][:2]
-        if "왜 그렇게 생각" not in out["question"]:
-            out["question"] = "왜 그렇게 생각하나요? (2문장)"
-
-    return out
 
 def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
     prompt = f"""
@@ -700,7 +646,7 @@ def generate_lesson_deep_debate(topic: str, rag_ctx: str) -> dict:
     }
 
 # =========================================================
-# 12) Teacher feedback
+# 13) Teacher feedback (칭찬 + 교사기준 반영 강제)
 # =========================================================
 def get_teacher_feedback_context() -> str:
     ctx = (st.session_state.get("teacher_feedback_context") or "").strip()
@@ -772,7 +718,7 @@ def feedback_with_tags(step_story: str, answer_text: str, rag_ctx: str, extra_co
     }
 
 # =========================================================
-# 13) Debate adaptive question generator (2 lines)
+# 14) Debate adaptive question generator (2 lines)
 # =========================================================
 def debate_next_question(topic: str, story: str, student_history: list, turn_index: int, rag_ctx: str) -> str:
     teacher_ctx = get_teacher_feedback_context()
@@ -801,7 +747,7 @@ def debate_next_question(topic: str, story: str, student_history: list, turn_ind
 """
     q = ask_gpt_text(prompt, system_prompt=DEBATE_Q_SYSTEM).strip()
     if not q:
-        q = "좋아, 생각이 또렷해.\n그 생각의 근거를 한 가지로 말해볼래?"
+        q = "좋아, 네 생각이 또렷해.\n그 생각의 근거를 한 가지로 말해볼래?"
     lines = [ln.strip() for ln in q.split("\n") if ln.strip()]
     if len(lines) == 1:
         q = f"좋아, 잘 설명했어.\n{lines[0]}"
@@ -810,7 +756,7 @@ def debate_next_question(topic: str, story: str, student_history: list, turn_ind
     return q
 
 # =========================================================
-# 14) Session state init
+# 15) Session state init
 # =========================================================
 default_state = {
     "mode": "👨‍🏫 교사용",
@@ -824,11 +770,13 @@ default_state = {
     "current_step": 0,
     "logs": [],
 
-    "story_setup": {},
+    # story mode (fixed)
+    "story_title": "",
     "story_outline": [],
-    "story_history": [],
-    "story_current": {},
+    "story_chapters": [],
+    "story_chapter_index": 1,
 
+    # debate mode
     "debate": {},
     "closing": {},
     "debate_turn": 0,
@@ -839,7 +787,7 @@ for k, v in default_state.items():
         st.session_state[k] = v
 
 # =========================================================
-# 15) Sidebar
+# 16) Sidebar
 # =========================================================
 st.sidebar.title("🤖 AI 윤리 교육")
 
@@ -859,21 +807,32 @@ mode = st.sidebar.radio("모드 선택", ["👨‍🏫 교사용", "🙋‍♂�
 st.session_state.mode = mode
 
 # =========================================================
-# 16) Centered smaller image (auto-adjust)
+# 17) Small image renderer (스토리 모드 이미지 대폭 축소)
 # =========================================================
-def show_step_illustration(key: str, prompt_text: str):
+def show_step_illustration_small(key: str, prompt_text: str, width_px: int = 300):
     if key not in st.session_state:
         with st.spinner("이미지 생성..."):
             st.session_state[key] = generate_image_bytes_cached(prompt_text, IMAGE_MODEL)
 
     img = st.session_state.get(key)
     if img:
-        cL, cM, cR = st.columns([3, 4, 3])
+        cL, cM, cR = st.columns([6, 2, 6])
         with cM:
-            st.image(img, use_container_width=True)
+            st.image(img, width=width_px)
+
+def show_step_illustration_medium(key: str, prompt_text: str, width_px: int = 420):
+    if key not in st.session_state:
+        with st.spinner("이미지 생성..."):
+            st.session_state[key] = generate_image_bytes_cached(prompt_text, IMAGE_MODEL)
+
+    img = st.session_state.get(key)
+    if img:
+        cL, cM, cR = st.columns([4, 4, 4])
+        with cM:
+            st.image(img, width=width_px)
 
 # =========================================================
-# 17) Teacher UI
+# 18) Teacher UI
 # =========================================================
 if mode == "👨‍🏫 교사용":
     st.header("🛠️ 교사용 수업 생성")
@@ -884,7 +843,7 @@ if mode == "👨‍🏫 교사용":
 - 주제 1개 입력 → 아래 3개 버튼 중 1개로 수업 생성  
 - 생성 시 reference.txt를 자동 참고(RAG)  
 - 학생 피드백은 교사 기준/관점을 반영  
-- 스토리 모드는 5막을 1막씩, 각 막은 짧게 전개
+- 스토리 모드는 ‘브러시’ 이야기로 5막 고정 진행
 """
         )
 
@@ -926,18 +885,21 @@ if mode == "👨‍🏫 교사용":
                     st.session_state.steps = lesson["steps"]
                     st.session_state.current_step = 0
 
-                    st.session_state.logs = []
-                    st.session_state.story_setup = {}
+                    # clear others
+                    st.session_state.story_title = ""
                     st.session_state.story_outline = []
-                    st.session_state.story_history = []
-                    st.session_state.story_current = {}
+                    st.session_state.story_chapters = []
+                    st.session_state.story_chapter_index = 1
+
                     st.session_state.debate = {}
                     st.session_state.closing = {}
                     st.session_state.debate_turn = 0
                     st.session_state.debate_msgs = []
 
+                    st.session_state.logs = []
                     clear_step_images_from_session()
                     clear_student_generated_images_from_session()
+                    clear_story_prompt_assets()
                     st.success("생성 완료.")
 
     with c2:
@@ -946,29 +908,30 @@ if mode == "👨‍🏫 교사용":
                 st.warning("주제 필요.")
             else:
                 with st.spinner("스토리 모드 수업 생성 중..."):
-                    rag_ctx = get_rag_ctx_for_topic(topic.strip())
-                    lesson = generate_lesson_story_mode(topic.strip(), rag_ctx)
+                    lesson = generate_lesson_story_mode_fixed(topic.strip())
 
                     st.session_state.lesson_type = lesson["lesson_type"]
                     st.session_state.analysis = lesson["analysis"]
                     st.session_state.teacher_guide = lesson["teacher_guide"]
 
+                    st.session_state.story_title = lesson["story_title"]
+                    st.session_state.story_outline = lesson["outline"]
+                    st.session_state.story_chapters = lesson["chapters"]
+                    st.session_state.story_chapter_index = 1
+
+                    # clear others
                     st.session_state.steps = []
                     st.session_state.current_step = 0
-
-                    st.session_state.logs = []
-                    st.session_state.story_setup = lesson["story_setup"]
-                    st.session_state.story_outline = lesson["outline"]
-                    st.session_state.story_history = []
-                    st.session_state.story_current = lesson["first_chapter"]
 
                     st.session_state.debate = {}
                     st.session_state.closing = {}
                     st.session_state.debate_turn = 0
                     st.session_state.debate_msgs = []
 
+                    st.session_state.logs = []
                     clear_step_images_from_session()
                     clear_student_generated_images_from_session()
+                    clear_story_prompt_assets()
                     st.success("생성 완료.")
 
     with c3:
@@ -984,22 +947,24 @@ if mode == "👨‍🏫 교사용":
                     st.session_state.analysis = lesson["analysis"]
                     st.session_state.teacher_guide = lesson["teacher_guide"]
 
+                    # clear others
                     st.session_state.steps = []
                     st.session_state.current_step = 0
 
-                    st.session_state.logs = []
-                    st.session_state.story_setup = {}
+                    st.session_state.story_title = ""
                     st.session_state.story_outline = []
-                    st.session_state.story_history = []
-                    st.session_state.story_current = {}
+                    st.session_state.story_chapters = []
+                    st.session_state.story_chapter_index = 1
 
                     st.session_state.debate = lesson["debate_step"]
                     st.session_state.closing = lesson["closing_step"]
                     st.session_state.debate_turn = 0
                     st.session_state.debate_msgs = []
 
+                    st.session_state.logs = []
                     clear_step_images_from_session()
                     clear_student_generated_images_from_session()
+                    clear_story_prompt_assets()
                     st.success("생성 완료.")
 
     if st.session_state.lesson_type:
@@ -1016,8 +981,24 @@ if mode == "👨‍🏫 교사용":
         st.divider()
         render_analysis_box(st.session_state.analysis)
 
+    # teacher preview for story
+    if st.session_state.lesson_type == LESSON_STORY_MODE and st.session_state.story_chapters:
+        st.divider()
+        st.subheader("📖 스토리 모드 미리보기(고정)")
+        st.write(f"🎨 제목: {st.session_state.story_title}")
+        with st.container(border=True):
+            st.markdown("### 5막 개요")
+            for i, o in enumerate(st.session_state.story_outline[:5], start=1):
+                st.write(f"- {i}막: {o.get('chapter_title','')} / {o.get('learning_focus','')}")
+        with st.container(border=True):
+            st.markdown("### 1막")
+            ch1 = st.session_state.story_chapters[0]
+            st.write(ch1.get("chapter_title", ""))
+            render_story_box(ch1.get("story", ""))
+            st.write(ch1.get("question", ""))
+
 # =========================================================
-# 18) Student UI
+# 19) Student UI
 # =========================================================
 else:
     st.header("🙋‍♂️ 학생용 학습")
@@ -1031,7 +1012,7 @@ else:
     def rag_ctx_for_step(text: str) -> str:
         if not rag_index:
             return ""
-        q = f"{st.session_state.topic} {text} 사례01 사례02 사례03 사례04 사례05 국가 인공지능 윤리기준 프라이버시 보호 연대성 데이터 관리 침해 금지 안전성"
+        q = f"{st.session_state.topic} {text} 저작권 출처 허락 사례01 사례02 사례03 사례04 사례05 국가 인공지능 윤리기준 프라이버시 보호 연대성 데이터 관리 침해 금지 안전성"
         return rag_retrieve(q, rag_index, top_k=RAG_TOP_K)
 
     # =====================================================
@@ -1056,8 +1037,8 @@ else:
         st.progress((idx + 1) / total)
         st.subheader(f"단계 {idx+1} ({step.get('type','')})")
 
-        show_step_illustration(f"step_img_{idx}", step.get("story", st.session_state.topic))
-        render_story_box(step.get("story", ""))  # 한줄씩 출력
+        show_step_illustration_medium(f"step_img_{idx}", step.get("story", st.session_state.topic), width_px=420)
+        render_story_box(step.get("story", ""))
 
         if step.get("type") == "image_revision":
             st.divider()
@@ -1101,9 +1082,10 @@ else:
                     st.rerun()
 
             if st.session_state.get(img1_key):
-                cL, cM, cR = st.columns([3, 4, 3])
+                show_step_illustration_small(img1_key + "_view", "preview", width_px=1)  # no-op safety
+                cL, cM, cR = st.columns([6, 2, 6])
                 with cM:
-                    st.image(st.session_state[img1_key], use_container_width=True, caption="1차 이미지")
+                    st.image(st.session_state[img1_key], width=360, caption="1차 이미지")
 
             default_p2 = st.session_state.get(p2_key, "")
             if not default_p2 and p1:
@@ -1130,9 +1112,9 @@ else:
                     st.rerun()
 
             if st.session_state.get(img2_key):
-                cL, cM, cR = st.columns([3, 4, 3])
+                cL, cM, cR = st.columns([6, 2, 6])
                 with cM:
-                    st.image(st.session_state[img2_key], use_container_width=True, caption="2차 이미지(수정본)")
+                    st.image(st.session_state[img2_key], width=360, caption="2차 이미지(수정본)")
 
             reflection = st.text_area(
                 "🗣️ 어떤 내용의 로고를 제작했나요?",
@@ -1255,75 +1237,99 @@ else:
                 st.rerun()
 
     # =====================================================
-    # B) STORY MODE LESSON
+    # B) STORY MODE LESSON (고정 5막 + 이미지 작게 + 문장 한줄씩)
     # =====================================================
     elif st.session_state.lesson_type == LESSON_STORY_MODE:
-        chap = st.session_state.story_current
-        if not chap:
+        if not st.session_state.story_chapters:
             st.warning("스토리 데이터 없음. 교사용에서 다시 생성 필요.")
             st.stop()
 
-        chap_idx = int(chap.get("chapter_index", 1))
-        st.progress(chap_idx / 5)
-        st.subheader(f"{chap_idx}막 / 5막")
-
-        show_step_illustration(f"step_img_story_{chap_idx}", chap.get("story", st.session_state.topic))
-        render_story_box(chap.get("story", ""))  # ✅ 한 줄씩 출력
-
-        opts = chap.get("options", [])
-        ending = bool(chap.get("ending", False))
-
-        if ending:
-            st.success("스토리 종료.")
-            if chap.get("debrief"):
-                st.write("배운 점:")
-                render_story_box(chap.get("debrief"))
-            if st.button("처음으로(학생)", key="story_restart"):
-                st.session_state.story_history = []
-                st.session_state.story_current = {}
-                clear_step_images_from_session()
-                st.rerun()
+        chap_idx = int(st.session_state.story_chapter_index)
+        chap_idx = max(1, min(5, chap_idx))
+        chapters = st.session_state.story_chapters
+        chap = next((c for c in chapters if int(c.get("chapter_index", 0)) == chap_idx), None)
+        if not chap:
+            st.warning("현재 막 데이터 없음.")
             st.stop()
 
-        if not isinstance(opts, list) or len(opts) < 2:
-            opts = ["A 선택", "B 선택"]
+        st.progress(chap_idx / 5)
+        st.subheader(f"{chap_idx}막 / 5막")
+        st.write(f"🎨 제목: {st.session_state.story_title}")
 
-        st.success("A: " + opts[0])
-        st.warning("B: " + opts[1])
+        # ✅ 스토리 모드 이미지: 매우 작게
+        show_step_illustration_small(f"step_img_story_{chap_idx}", chap.get("story", st.session_state.topic), width_px=280)
 
-        pick = st.radio("선택", ["A", "B"], horizontal=True, key=f"story_pick_{chap_idx}")
-        reason = st.text_area("왜 그렇게 생각하나요?", key=f"story_reason_{chap_idx}", placeholder="2~4문장")
+        # ✅ 한 줄씩 출력
+        st.write(chap.get("chapter_title", ""))
+        render_story_box(chap.get("story", ""))
 
-        if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
-            if not reason.strip():
-                st.warning("이유 입력 필요.")
-            else:
-                choice_text = opts[0] if pick == "A" else opts[1]
-                st.session_state.story_history.append({
-                    "chapter_index": chap_idx,
-                    "story": chap.get("story", ""),
-                    "choice": f"{pick}: {choice_text}",
-                    "reason": reason.strip(),
-                })
+        # ✅ 1막: 학생이 직접 프롬프트 작성/출력 + (선택) 이미지 생성
+        if chap_idx == 1 and chap.get("act1_prompt_activity"):
+            st.divider()
+            st.subheader("🧩 1막 활동: 내가 만드는 이미지 프롬프트")
+            st.caption(chap.get("prompt_activity_desc", ""))
 
-                rag_ctx = rag_ctx_for_step(chap.get("story", ""))
-                next_idx = chap_idx + 1
-                with st.spinner("다음 장면 생성..."):
-                    nxt = generate_story_next_chapter(
-                        st.session_state.topic,
-                        st.session_state.story_setup,
-                        st.session_state.story_history,
-                        next_idx,
-                        rag_ctx=rag_ctx
+            st.session_state["story_act1_prompt"] = st.text_area(
+                "프롬프트 작성(글자 없는 그림)",
+                value=st.session_state.get("story_act1_prompt", ""),
+                placeholder="예: colorful forest village, cozy houses, winding paths, soft sunlight, flat illustration, no text"
+            )
+
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("프롬프트 출력(저장)", key="story_prompt_save"):
+                    p = (st.session_state.get("story_act1_prompt") or "").strip()
+                    if not p:
+                        st.warning("프롬프트를 먼저 작성해 주세요.")
+                    else:
+                        st.session_state["story_act1_prompt_final"] = p
+                        st.success("프롬프트를 저장했어요.")
+            with c2:
+                if st.button("프롬프트 예시 넣기", key="story_prompt_example"):
+                    st.session_state["story_act1_prompt"] = (
+                        "warm forest village, small cozy cottages, river and bridge, friendly animals, "
+                        "soft pastel colors, flat illustration, simple shapes, no text"
                     )
-                st.session_state.story_current = nxt
+                    st.rerun()
 
+            if st.session_state.get("story_act1_prompt_final"):
+                with st.container(border=True):
+                    st.write("내 프롬프트:")
+                    st.code(st.session_state["story_act1_prompt_final"], language="text")
+
+                # (선택) 실제 이미지 생성
+                if st.button("이 프롬프트로 이미지 만들기(선택)", key="story_prompt_make_img"):
+                    with st.spinner("이미지 생성..."):
+                        st.session_state["story_act1_img"] = generate_image_bytes_cached(
+                            st.session_state["story_act1_prompt_final"], IMAGE_MODEL
+                        )
+                    st.rerun()
+
+                if st.session_state.get("story_act1_img"):
+                    cL, cM, cR = st.columns([6, 2, 6])
+                    with cM:
+                        st.image(st.session_state["story_act1_img"], width=280)
+
+        st.divider()
+        st.write(chap.get("question", ""))
+
+        answer_key = f"story_answer_{chap_idx}"
+        ans = st.text_area("내 생각", key=answer_key, placeholder="2~6줄")
+
+        if st.button("제출(피드백)", key=f"story_submit_{chap_idx}"):
+            if not ans.strip():
+                st.warning("답을 입력해 주세요.")
+            else:
+                rag_ctx = rag_ctx_for_step(chap.get("story", ""))
+                extra = "스토리 모드(고정 5막)"
+                if chap_idx == 1 and st.session_state.get("story_act1_prompt_final"):
+                    extra += f" / 1막 프롬프트: {st.session_state.get('story_act1_prompt_final')}"
                 with st.spinner("피드백..."):
                     fb = feedback_with_tags(
                         chap.get("story", ""),
-                        f"선택: {pick} / {choice_text}\n이유: {reason.strip()}",
+                        f"[질문] {chap.get('question','')}\n[답] {ans.strip()}",
                         rag_ctx=rag_ctx,
-                        extra_context="스토리 모드 진행"
+                        extra_context=extra
                     )
                 with st.container(border=True):
                     if fb.get("tags"):
@@ -1337,10 +1343,28 @@ else:
                     "topic": st.session_state.topic,
                     "lesson_type": st.session_state.lesson_type,
                     "chapter": chap_idx,
-                    "choice": pick,
-                    "reason": reason.strip(),
+                    "question": chap.get("question", ""),
+                    "answer": ans.strip(),
+                    "act1_prompt": st.session_state.get("story_act1_prompt_final", "") if chap_idx == 1 else "",
                     "feedback": fb,
                 })
+
+        # 다음 단계 이동
+        if chap.get("ending"):
+            st.divider()
+            st.success("스토리 종료.")
+            if chap.get("debrief"):
+                st.write("정리")
+                render_story_box(chap.get("debrief", ""))
+            if st.button("처음으로(학생)", key="story_restart"):
+                st.session_state.story_chapter_index = 1
+                st.session_state.logs = []
+                clear_step_images_from_session()
+                clear_story_prompt_assets()
+                st.rerun()
+        else:
+            if st.button("다음 단계로", key=f"story_next_{chap_idx}"):
+                st.session_state.story_chapter_index = chap_idx + 1
                 st.rerun()
 
     # =====================================================
@@ -1354,14 +1378,14 @@ else:
             st.stop()
 
         st.subheader("딜레마 토론 상황")
-        show_step_illustration("step_img_debate", debate.get("story", st.session_state.topic))
+        show_step_illustration_small("step_img_debate", debate.get("story", st.session_state.topic), width_px=300)
 
         if debate.get("case_title"):
             st.write("사례:", debate.get("case_title", ""))
         if debate.get("case_summary"):
             st.write("요약:", debate.get("case_summary", ""))
 
-        render_story_box(debate.get("story", ""))  # 한 줄씩 출력
+        render_story_box(debate.get("story", ""))
 
         cons = debate.get("constraints", [])
         if isinstance(cons, list) and cons:
@@ -1370,6 +1394,7 @@ else:
                     st.write(f"- {it}")
 
         rag_ctx = rag_ctx_for_step(debate.get("story", ""))
+
         turns = int(debate.get("turns", 3))
         if turns != 3:
             turns = 3
@@ -1481,9 +1506,9 @@ else:
                 clear_step_images_from_session()
                 st.rerun()
 
-    # -----------------------------------------------------
+    # =====================================================
     # Logs download
-    # -----------------------------------------------------
+    # =====================================================
     if st.session_state.logs:
         st.divider()
         st.download_button(
